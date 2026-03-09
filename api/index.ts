@@ -6,46 +6,56 @@ import { put } from '@vercel/blob';
 import { sql } from '@vercel/postgres';
 import fs from 'fs';
 import path from 'path';
-import Database from 'better-sqlite3';
 
 const PORT = 3000;
 const app = express();
 app.use(express.json());
 
 // --- Database Setup ---
-let db: Database.Database | null = null;
+let db: any = null;
+let isDbInitialized = false;
 
-if (process.env.POSTGRES_URL) {
-  // Initialize Vercel Postgres Table
-  sql`
-    CREATE TABLE IF NOT EXISTS students (
-      id VARCHAR(255) PRIMARY KEY,
-      name VARCHAR(255),
-      student_id VARCHAR(255),
-      solution_url TEXT,
-      solution_filename TEXT,
-      grade TEXT,
-      justification TEXT,
-      feedback TEXT,
-      status VARCHAR(50)
-    )
-  `.catch(console.error);
-} else {
-  // Initialize Local SQLite
-  db = new Database('autograder.db');
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS students (
-      id TEXT PRIMARY KEY,
-      name TEXT,
-      student_id TEXT,
-      solution_url TEXT,
-      solution_filename TEXT,
-      grade TEXT,
-      justification TEXT,
-      feedback TEXT,
-      status TEXT
-    )
-  `);
+async function initDb() {
+  if (isDbInitialized) return;
+
+  try {
+    if (process.env.POSTGRES_URL) {
+      // Initialize Vercel Postgres Table
+      await sql`
+        CREATE TABLE IF NOT EXISTS students (
+          id VARCHAR(255) PRIMARY KEY,
+          name VARCHAR(255),
+          student_id VARCHAR(255),
+          solution_url TEXT,
+          solution_filename TEXT,
+          grade TEXT,
+          justification TEXT,
+          feedback TEXT,
+          status VARCHAR(50)
+        )
+      `;
+    } else {
+      // Initialize Local SQLite dynamically so it doesn't crash Vercel
+      const Database = (await import('better-sqlite3')).default;
+      db = new Database('autograder.db');
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS students (
+          id TEXT PRIMARY KEY,
+          name TEXT,
+          student_id TEXT,
+          solution_url TEXT,
+          solution_filename TEXT,
+          grade TEXT,
+          justification TEXT,
+          feedback TEXT,
+          status TEXT
+        )
+      `);
+    }
+    isDbInitialized = true;
+  } catch (error) {
+    console.error('Database initialization error:', error);
+  }
 }
 
 // --- Storage Setup ---
@@ -69,66 +79,90 @@ app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 const upload = multer({ storage: multer.memoryStorage() });
 
 app.get('/api/students', async (req, res) => {
-  if (process.env.POSTGRES_URL) {
-    const { rows } = await sql`SELECT * FROM students`;
-    res.json(rows);
-  } else {
-    const students = db!.prepare('SELECT * FROM students').all();
-    res.json(students);
+  try {
+    await initDb();
+    if (process.env.POSTGRES_URL) {
+      const { rows } = await sql`SELECT * FROM students`;
+      res.json(rows);
+    } else {
+      const students = db.prepare('SELECT * FROM students').all();
+      res.json(students);
+    }
+  } catch (error) {
+    console.error('Error fetching students:', error);
+    res.status(500).json({ error: 'Failed to fetch students' });
   }
 });
 
 app.post('/api/students', async (req, res) => {
-  const { id, name, student_id, status } = req.body;
-  const safeName = name || '';
-  const safeStudentId = student_id || '';
-  const safeStatus = status || 'idle';
+  try {
+    await initDb();
+    const { id, name, student_id, status } = req.body;
+    const safeName = name || '';
+    const safeStudentId = student_id || '';
+    const safeStatus = status || 'idle';
 
-  if (process.env.POSTGRES_URL) {
-    await sql`
-      INSERT INTO students (id, name, student_id, status)
-      VALUES (${id}, ${safeName}, ${safeStudentId}, ${safeStatus})
-    `;
-  } else {
-    db!.prepare(`
-      INSERT INTO students (id, name, student_id, status)
-      VALUES (@id, @name, @student_id, @status)
-    `).run({ id, name: safeName, student_id: safeStudentId, status: safeStatus });
+    if (process.env.POSTGRES_URL) {
+      await sql`
+        INSERT INTO students (id, name, student_id, status)
+        VALUES (${id}, ${safeName}, ${safeStudentId}, ${safeStatus})
+      `;
+    } else {
+      db.prepare(`
+        INSERT INTO students (id, name, student_id, status)
+        VALUES (@id, @name, @student_id, @status)
+      `).run({ id, name: safeName, student_id: safeStudentId, status: safeStatus });
+    }
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error adding student:', error);
+    res.status(500).json({ error: 'Failed to add student' });
   }
-  res.json({ success: true });
 });
 
 app.put('/api/students/:id', async (req, res) => {
-  const { id } = req.params;
-  const updates = req.body;
-  
-  if (process.env.POSTGRES_URL) {
-    // Dynamic update for Postgres
-    if (updates.name !== undefined) await sql`UPDATE students SET name = ${updates.name} WHERE id = ${id}`;
-    if (updates.student_id !== undefined) await sql`UPDATE students SET student_id = ${updates.student_id} WHERE id = ${id}`;
-    if (updates.status !== undefined) await sql`UPDATE students SET status = ${updates.status} WHERE id = ${id}`;
-    if (updates.feedback !== undefined) await sql`UPDATE students SET feedback = ${updates.feedback} WHERE id = ${id}`;
-    if (updates.grade !== undefined) await sql`UPDATE students SET grade = ${updates.grade} WHERE id = ${id}`;
-    if (updates.justification !== undefined) await sql`UPDATE students SET justification = ${updates.justification} WHERE id = ${id}`;
-    if (updates.solution_url !== undefined) await sql`UPDATE students SET solution_url = ${updates.solution_url} WHERE id = ${id}`;
-    if (updates.solution_filename !== undefined) await sql`UPDATE students SET solution_filename = ${updates.solution_filename} WHERE id = ${id}`;
-  } else {
-    const setClause = Object.keys(updates).map(k => `${k} = @${k}`).join(', ');
-    if (setClause) {
-      db!.prepare(`UPDATE students SET ${setClause} WHERE id = @id`).run({ ...updates, id });
+  try {
+    await initDb();
+    const { id } = req.params;
+    const updates = req.body;
+    
+    if (process.env.POSTGRES_URL) {
+      // Dynamic update for Postgres
+      if (updates.name !== undefined) await sql`UPDATE students SET name = ${updates.name} WHERE id = ${id}`;
+      if (updates.student_id !== undefined) await sql`UPDATE students SET student_id = ${updates.student_id} WHERE id = ${id}`;
+      if (updates.status !== undefined) await sql`UPDATE students SET status = ${updates.status} WHERE id = ${id}`;
+      if (updates.feedback !== undefined) await sql`UPDATE students SET feedback = ${updates.feedback} WHERE id = ${id}`;
+      if (updates.grade !== undefined) await sql`UPDATE students SET grade = ${updates.grade} WHERE id = ${id}`;
+      if (updates.justification !== undefined) await sql`UPDATE students SET justification = ${updates.justification} WHERE id = ${id}`;
+      if (updates.solution_url !== undefined) await sql`UPDATE students SET solution_url = ${updates.solution_url} WHERE id = ${id}`;
+      if (updates.solution_filename !== undefined) await sql`UPDATE students SET solution_filename = ${updates.solution_filename} WHERE id = ${id}`;
+    } else {
+      const setClause = Object.keys(updates).map(k => `${k} = @${k}`).join(', ');
+      if (setClause) {
+        db.prepare(`UPDATE students SET ${setClause} WHERE id = @id`).run({ ...updates, id });
+      }
     }
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error updating student:', error);
+    res.status(500).json({ error: 'Failed to update student' });
   }
-  res.json({ success: true });
 });
 
 app.delete('/api/students/:id', async (req, res) => {
-  const { id } = req.params;
-  if (process.env.POSTGRES_URL) {
-    await sql`DELETE FROM students WHERE id = ${id}`;
-  } else {
-    db!.prepare('DELETE FROM students WHERE id = ?').run(id);
+  try {
+    await initDb();
+    const { id } = req.params;
+    if (process.env.POSTGRES_URL) {
+      await sql`DELETE FROM students WHERE id = ${id}`;
+    } else {
+      db.prepare('DELETE FROM students WHERE id = ?').run(id);
+    }
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting student:', error);
+    res.status(500).json({ error: 'Failed to delete student' });
   }
-  res.json({ success: true });
 });
 
 app.post('/api/students/:id/grade', upload.fields([
@@ -138,6 +172,7 @@ app.post('/api/students/:id/grade', upload.fields([
   { name: 'solution', maxCount: 1 }
 ]), async (req, res) => {
   try {
+    await initDb();
     const { id } = req.params;
     const { genericInstructions, feedback, studentName, studentId } = req.body;
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
@@ -153,7 +188,7 @@ app.post('/api/students/:id/grade', upload.fields([
       const { rows } = await sql`SELECT * FROM students WHERE id = ${id}`;
       student = rows[0];
     } else {
-      student = db!.prepare('SELECT * FROM students WHERE id = ?').get(id);
+      student = db.prepare('SELECT * FROM students WHERE id = ?').get(id);
     }
 
     if (!assignmentFile) {
@@ -191,7 +226,7 @@ app.post('/api/students/:id/grade', upload.fields([
     if (process.env.POSTGRES_URL) {
       await sql`UPDATE students SET status = 'grading', solution_url = ${solutionUrl}, solution_filename = ${solutionFilename} WHERE id = ${id}`;
     } else {
-      db!.prepare(`UPDATE students SET status = 'grading', solution_url = @url, solution_filename = @filename WHERE id = @id`)
+      db.prepare(`UPDATE students SET status = 'grading', solution_url = @url, solution_filename = @filename WHERE id = @id`)
         .run({ id, url: solutionUrl, filename: solutionFilename });
     }
 
@@ -251,7 +286,7 @@ app.post('/api/students/:id/grade', upload.fields([
     if (process.env.POSTGRES_URL) {
       await sql`UPDATE students SET status = 'graded', grade = ${result.grade}, justification = ${result.justification} WHERE id = ${id}`;
     } else {
-      db!.prepare(`UPDATE students SET status = 'graded', grade = @grade, justification = @justification WHERE id = @id`)
+      db.prepare(`UPDATE students SET status = 'graded', grade = @grade, justification = @justification WHERE id = @id`)
         .run({ id, grade: result.grade, justification: result.justification });
     }
 
@@ -262,7 +297,7 @@ app.post('/api/students/:id/grade', upload.fields([
     if (process.env.POSTGRES_URL) {
       await sql`UPDATE students SET status = 'error' WHERE id = ${req.params.id}`;
     } else {
-      db!.prepare(`UPDATE students SET status = 'error' WHERE id = ?`).run(req.params.id);
+      db.prepare(`UPDATE students SET status = 'error' WHERE id = ?`).run(req.params.id);
     }
     res.status(500).json({ error: 'Grading failed' });
   }
