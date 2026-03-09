@@ -1,390 +1,637 @@
 import React, { useState, useEffect } from 'react';
-import { FileUp, FileText, BookOpen, UserPlus, GraduationCap, CheckCircle, AlertCircle, Loader2, RefreshCw, MessageSquare } from 'lucide-react';
-import { Student } from './types';
+import { Upload, FileText, CheckCircle, AlertCircle, Loader2, Plus, Trash2, ArrowLeft, BookOpen, Users, Play, RefreshCw } from 'lucide-react';
+import { v4 as uuidv4 } from 'uuid';
 
-export default function App() {
+type Session = {
+  id: string;
+  name: string;
+  assignment_filename: string;
+  model_answer_filename?: string;
+  course_materials: { url: string, filename: string }[];
+  generic_instructions?: string;
+  created_at: string;
+};
+
+type Student = {
+  id: string;
+  session_id: string;
+  name: string;
+  student_id: string;
+  solution_filename: string;
+  grade?: string;
+  justification?: string;
+  feedback?: string;
+  status: 'idle' | 'grading' | 'graded' | 'error';
+};
+
+function App() {
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [activeSession, setActiveSession] = useState<Session | null>(null);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Create Session State
+  const [isCreatingSession, setIsCreatingSession] = useState(false);
+  const [sessionName, setSessionName] = useState('');
   const [assignmentFile, setAssignmentFile] = useState<File | null>(null);
   const [modelAnswerFile, setModelAnswerFile] = useState<File | null>(null);
-  const [courseMaterials, setCourseMaterials] = useState<File[]>([]);
-  const [genericInstructions, setGenericInstructions] = useState<string>('');
-  const [students, setStudents] = useState<Student[]>([]);
+  const [courseMaterialsFiles, setCourseMaterialsFiles] = useState<FileList | null>(null);
+  const [genericInstructions, setGenericInstructions] = useState('');
+  const [isSubmittingSession, setIsSubmittingSession] = useState(false);
+
+  // Add Student State
+  const [isAddingStudent, setIsAddingStudent] = useState(false);
+  const [studentName, setStudentName] = useState('');
+  const [studentId, setStudentId] = useState('');
+  const [solutionFile, setSolutionFile] = useState<File | null>(null);
+  const [isSubmittingStudent, setIsSubmittingStudent] = useState(false);
+  const [studentFeedbacks, setStudentFeedbacks] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    fetch('/api/students')
-      .then(res => res.json())
-      .then(data => {
-        const mapped = data.map((s: any) => ({
-          id: s.id,
-          name: s.name || '',
-          studentId: s.student_id || '',
-          solutionFile: null,
-          solutionUrl: s.solution_url,
-          solutionFilename: s.solution_filename,
-          grade: s.grade,
-          justification: s.justification,
-          feedback: s.feedback || '',
-          status: s.status
-        }));
-        setStudents(mapped);
-      })
-      .catch(err => console.error('Failed to load students', err));
+    fetchSessions();
   }, []);
 
-  const handleAddStudent = async () => {
-    const newStudent = {
-      id: crypto.randomUUID(),
-      name: '',
-      studentId: '',
-      solutionFile: null,
-      grade: null,
-      justification: null,
-      feedback: null,
-      status: 'idle' as const,
-    };
-    
-    setStudents([...students, newStudent]);
+  useEffect(() => {
+    if (activeSession) {
+      fetchStudents(activeSession.id);
+    }
+  }, [activeSession]);
 
-    await fetch('/api/students', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        id: newStudent.id,
-        name: newStudent.name,
-        student_id: newStudent.studentId,
-        status: newStudent.status
-      })
-    });
-  };
-
-  const handleUpdateStudent = async (id: string, updates: Partial<Student>) => {
-    setStudents(students.map(s => (s.id === id ? { ...s, ...updates } : s)));
-
-    const dbUpdates: any = {};
-    if (updates.name !== undefined) dbUpdates.name = updates.name;
-    if (updates.studentId !== undefined) dbUpdates.student_id = updates.studentId;
-    if (updates.feedback !== undefined) dbUpdates.feedback = updates.feedback;
-    if (updates.status !== undefined) dbUpdates.status = updates.status;
-
-    if (Object.keys(dbUpdates).length > 0) {
-      await fetch(`/api/students/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(dbUpdates)
-      });
+  const fetchSessions = async () => {
+    try {
+      const res = await fetch('/api/sessions');
+      const data = await res.json();
+      setSessions(data);
+    } catch (error) {
+      console.error('Failed to fetch sessions', error);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const handleRemoveStudent = async (id: string) => {
-    setStudents(students.filter(s => s.id !== id));
-    await fetch(`/api/students/${id}`, { method: 'DELETE' });
+  const fetchStudents = async (sessionId: string) => {
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/students`);
+      const data = await res.json();
+      setStudents(data);
+    } catch (error) {
+      console.error('Failed to fetch students', error);
+    }
   };
 
-  const handleGradeStudent = async (student: Student) => {
-    if (!assignmentFile) {
-      alert('Please upload an assignment file first.');
-      return;
-    }
-    if (!student.solutionFile && !student.solutionUrl) {
-      alert('Please upload a solution file for the student.');
-      return;
-    }
+  const handleCreateSession = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!assignmentFile || !sessionName) return;
 
-    handleUpdateStudent(student.id, { status: 'grading', grade: null, justification: null });
-
+    setIsSubmittingSession(true);
     const formData = new FormData();
+    const sessionId = uuidv4();
+    formData.append('id', sessionId);
+    formData.append('name', sessionName);
     formData.append('assignment', assignmentFile);
     if (modelAnswerFile) formData.append('modelAnswer', modelAnswerFile);
-    courseMaterials.forEach(f => formData.append('courseMaterials', f));
-    if (student.solutionFile) formData.append('solution', student.solutionFile);
-    
-    formData.append('studentName', student.name);
-    formData.append('studentId', student.studentId);
+    if (courseMaterialsFiles) {
+      Array.from(courseMaterialsFiles).forEach(file => {
+        formData.append('courseMaterials', file);
+      });
+    }
     formData.append('genericInstructions', genericInstructions);
-    if (student.feedback) formData.append('feedback', student.feedback);
 
     try {
-      const res = await fetch(`/api/students/${student.id}/grade`, {
+      const res = await fetch('/api/sessions', {
         method: 'POST',
-        body: formData
+        body: formData,
       });
-      const data = await res.json();
-      
-      if (data.success) {
-        handleUpdateStudent(student.id, {
-          status: 'graded',
-          grade: data.grade,
-          justification: data.justification,
-          solutionUrl: data.solutionUrl,
-          solutionFilename: data.solutionFilename
-        });
+      if (res.ok) {
+        await fetchSessions();
+        setIsCreatingSession(false);
+        // Reset form
+        setSessionName('');
+        setAssignmentFile(null);
+        setModelAnswerFile(null);
+        setCourseMaterialsFiles(null);
+        setGenericInstructions('');
       } else {
-        console.error('Grading error:', data.error, data.details);
-        alert(`Grading failed: ${data.details || data.error}`);
-        handleUpdateStudent(student.id, { status: 'error' });
+        const data = await res.json();
+        alert(`Failed to create session: ${data.details || data.error}`);
       }
     } catch (error) {
-      console.error('Grading exception:', error);
-      alert(`Grading failed: ${error instanceof Error ? error.message : 'Network error'}`);
-      handleUpdateStudent(student.id, { status: 'error' });
+      alert('Network error while creating session.');
+    } finally {
+      setIsSubmittingSession(false);
     }
   };
 
-  return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col md:flex-row">
-      {/* Sidebar / Global Settings */}
-      <aside className="w-full md:w-80 bg-white border-r border-slate-200 p-6 flex flex-col gap-6 overflow-y-auto">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-indigo-900 flex items-center gap-2">
-            <GraduationCap className="w-8 h-8 text-indigo-600" />
-            AutoGrader
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">Intelligent assignment grading</p>
-        </div>
+  const handleAddStudent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeSession || !solutionFile) return;
 
-        <div className="space-y-6">
-          {/* Assignment Upload */}
-          <div className="space-y-2">
-            <label className="block text-sm font-medium text-slate-700 flex items-center gap-2">
-              <FileText className="w-4 h-4" />
-              Assignment & Rubric (Required)
-            </label>
-            <div className="relative">
-              <input
-                type="file"
-                accept=".pdf,.txt,.docx"
-                onChange={(e) => setAssignmentFile(e.target.files?.[0] || null)}
-                className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer border border-slate-200 rounded-md"
-              />
-            </div>
-            {assignmentFile && <p className="text-xs text-emerald-600 flex items-center gap-1"><CheckCircle className="w-3 h-3" /> {assignmentFile.name}</p>}
-          </div>
+    setIsSubmittingStudent(true);
+    const formData = new FormData();
+    formData.append('id', uuidv4());
+    formData.append('name', studentName);
+    formData.append('student_id', studentId);
+    formData.append('solution', solutionFile);
 
-          {/* Model Answer Upload */}
-          <div className="space-y-2">
-            <label className="block text-sm font-medium text-slate-700 flex items-center gap-2">
-              <FileUp className="w-4 h-4" />
-              Model Answer (Optional)
-            </label>
-            <div className="relative">
-              <input
-                type="file"
-                accept=".pdf,.txt,.docx"
-                onChange={(e) => setModelAnswerFile(e.target.files?.[0] || null)}
-                className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 cursor-pointer border border-slate-200 rounded-md"
-              />
-            </div>
-            {modelAnswerFile && <p className="text-xs text-emerald-600 flex items-center gap-1"><CheckCircle className="w-3 h-3" /> {modelAnswerFile.name}</p>}
-          </div>
+    try {
+      const res = await fetch(`/api/sessions/${activeSession.id}/students`, {
+        method: 'POST',
+        body: formData,
+      });
+      if (res.ok) {
+        await fetchStudents(activeSession.id);
+        setIsAddingStudent(false);
+        setStudentName('');
+        setStudentId('');
+        setSolutionFile(null);
+      } else {
+        const data = await res.json();
+        alert(`Failed to add student: ${data.details || data.error}`);
+      }
+    } catch (error) {
+      alert('Network error while adding student.');
+    } finally {
+      setIsSubmittingStudent(false);
+    }
+  };
 
-          {/* Course Materials Upload */}
-          <div className="space-y-2">
-            <label className="block text-sm font-medium text-slate-700 flex items-center gap-2">
-              <BookOpen className="w-4 h-4" />
-              Course Materials (Optional)
-            </label>
-            <div className="relative">
-              <input
-                type="file"
-                multiple
-                accept=".pdf,.txt,.docx"
-                onChange={(e) => setCourseMaterials(Array.from(e.target.files || []))}
-                className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 cursor-pointer border border-slate-200 rounded-md"
-              />
-            </div>
-            {courseMaterials.length > 0 && (
-              <ul className="text-xs text-emerald-600 space-y-1">
-                {courseMaterials.map((f, i) => (
-                  <li key={i} className="flex items-center gap-1"><CheckCircle className="w-3 h-3" /> {f.name}</li>
-                ))}
-              </ul>
-            )}
-          </div>
+  const handleGradeStudent = async (studentId: string, feedback?: string) => {
+    // Optimistic UI update
+    setStudents(prev => prev.map(s => s.id === studentId ? { ...s, status: 'grading' } : s));
 
-          {/* Generic Instructions */}
-          <div className="space-y-2">
-            <label className="block text-sm font-medium text-slate-700 flex items-center gap-2">
-              <MessageSquare className="w-4 h-4" />
-              General Instructions
-            </label>
-            <p className="text-xs text-slate-500">Apply to all grading (e.g., "be brief", "focus on grammar")</p>
-            <textarea
-              rows={3}
-              placeholder="e.g. Be brief, focus on code quality, ignore spelling mistakes..."
-              value={genericInstructions}
-              onChange={(e) => setGenericInstructions(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none resize-y"
-            />
-          </div>
-        </div>
-      </aside>
+    try {
+      const res = await fetch(`/api/students/${studentId}/grade`, { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ feedback })
+      });
+      const data = await res.json();
 
-      {/* Main Content / Students List */}
-      <main className="flex-1 p-6 md:p-10 overflow-y-auto">
-        <div className="max-w-4xl mx-auto space-y-8">
-          <div className="flex items-center justify-between">
+      if (res.ok && data.success) {
+        setStudents(prev => prev.map(s => s.id === studentId ? {
+          ...s,
+          status: 'graded',
+          grade: data.grade,
+          justification: data.justification
+        } : s));
+      } else {
+        alert(`Grading failed: ${data.details || data.error}`);
+        setStudents(prev => prev.map(s => s.id === studentId ? { ...s, status: 'error' } : s));
+      }
+    } catch (error: any) {
+      alert(`Grading failed: ${error.message}`);
+      setStudents(prev => prev.map(s => s.id === studentId ? { ...s, status: 'error' } : s));
+    }
+  };
+
+  const handleGradeAll = async (regradeAll: boolean = false, feedback?: string) => {
+    if (!activeSession) return;
+    const targetStudents = students.filter(s => regradeAll ? s.status !== 'grading' : (s.status === 'idle' || s.status === 'error'));
+    if (targetStudents.length === 0) {
+      alert("No students to process.");
+      return;
+    }
+
+    setStudents(prev => prev.map(s => (regradeAll ? s.status !== 'grading' : (s.status === 'idle' || s.status === 'error')) ? { ...s, status: 'grading' } : s));
+
+    try {
+      const res = await fetch(`/api/sessions/${activeSession.id}/grade-all`, { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ feedback, regradeAll })
+      });
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        await fetchStudents(activeSession.id);
+      } else {
+        alert(`Batch grading failed: ${data.details || data.error}`);
+        setStudents(prev => prev.map(s => (s.status === 'grading') ? { ...s, status: 'error' } : s));
+      }
+    } catch (error: any) {
+      alert(`Batch grading failed: ${error.message}`);
+      setStudents(prev => prev.map(s => (s.status === 'grading') ? { ...s, status: 'error' } : s));
+    }
+  };
+
+  const handleDeleteStudent = async (studentId: string) => {
+    if (!confirm('Are you sure you want to delete this student?')) return;
+    try {
+      await fetch(`/api/students/${studentId}`, { method: 'DELETE' });
+      setStudents(prev => prev.filter(s => s.id !== studentId));
+    } catch (error) {
+      console.error('Failed to delete student', error);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+      </div>
+    );
+  }
+
+  // --- VIEW: Session List ---
+  if (!activeSession) {
+    return (
+      <div className="min-h-screen bg-slate-50 p-8">
+        <div className="max-w-4xl mx-auto">
+          <div className="flex justify-between items-center mb-8">
             <div>
-              <h2 className="text-2xl font-semibold text-slate-900">Students to Grade</h2>
-              <p className="text-sm text-slate-500 mt-1">Add students and upload their solutions to begin grading.</p>
+              <h1 className="text-3xl font-bold text-slate-900 flex items-center gap-2">
+                <BookOpen className="w-8 h-8 text-indigo-600" />
+                AutoGrader Sessions
+              </h1>
+              <p className="text-slate-600 mt-2">Manage your grading sessions and assignments.</p>
             </div>
             <button
-              onClick={handleAddStudent}
-              className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors shadow-sm font-medium text-sm"
+              onClick={() => setIsCreatingSession(true)}
+              className="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-indigo-700 transition-colors"
             >
-              <UserPlus className="w-4 h-4" />
-              Add Student
+              <Plus className="w-4 h-4" /> New Session
             </button>
           </div>
 
-          {students.length === 0 ? (
-            <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-slate-300">
-              <GraduationCap className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-slate-900">No students added yet</h3>
-              <p className="text-slate-500 mt-1 mb-6">Click the button above to add a student and start grading.</p>
-              <button
-                onClick={handleAddStudent}
-                className="inline-flex items-center gap-2 bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-50 transition-colors shadow-sm font-medium text-sm"
-              >
-                <UserPlus className="w-4 h-4" />
-                Add First Student
-              </button>
+          {isCreatingSession && (
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-8">
+              <h2 className="text-xl font-semibold mb-4">Create New Grading Session</h2>
+              <form onSubmit={handleCreateSession} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Session Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={sessionName}
+                    onChange={(e) => setSessionName(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-md"
+                    placeholder="e.g., Fall 2026 - Midterm Exam"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Assignment & Rubric (PDF) *</label>
+                  <input
+                    type="file"
+                    required
+                    accept=".pdf"
+                    onChange={(e) => setAssignmentFile(e.target.files?.[0] || null)}
+                    className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Model Answer (Optional PDF)</label>
+                  <input
+                    type="file"
+                    accept=".pdf"
+                    onChange={(e) => setModelAnswerFile(e.target.files?.[0] || null)}
+                    className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Course Materials (Optional PDFs)</label>
+                  <input
+                    type="file"
+                    multiple
+                    accept=".pdf"
+                    onChange={(e) => setCourseMaterialsFiles(e.target.files)}
+                    className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">General Instructions (Optional)</label>
+                  <textarea
+                    value={genericInstructions}
+                    onChange={(e) => setGenericInstructions(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-md h-24"
+                    placeholder="e.g., Be brief, focus on code quality..."
+                  />
+                </div>
+                <div className="flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsCreatingSession(false)}
+                    className="px-4 py-2 text-slate-600 hover:text-slate-900"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmittingSession || !assignmentFile || !sessionName}
+                    className="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-indigo-700 disabled:opacity-50"
+                  >
+                    {isSubmittingSession ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                    Create Session
+                  </button>
+                </div>
+              </form>
             </div>
-          ) : (
-            <div className="space-y-6">
-              {students.map((student) => (
-                <div key={student.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                  <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center gap-4 justify-between">
-                    <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-xs font-medium text-slate-500 mb-1 uppercase tracking-wider">Student Name</label>
-                        <input
-                          type="text"
-                          placeholder="e.g. Jane Doe"
-                          value={student.name}
-                          onChange={(e) => handleUpdateStudent(student.id, { name: e.target.value })}
-                          className="w-full bg-white border border-slate-300 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-shadow"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-slate-500 mb-1 uppercase tracking-wider">Student ID (Optional)</label>
-                        <input
-                          type="text"
-                          placeholder="e.g. 12345678"
-                          value={student.studentId}
-                          onChange={(e) => handleUpdateStudent(student.id, { studentId: e.target.value })}
-                          className="w-full bg-white border border-slate-300 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-shadow"
-                        />
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRemoveStudent(student.id)}
-                      className="text-slate-400 hover:text-red-500 text-sm font-medium transition-colors self-start sm:self-center"
-                    >
-                      Remove
-                    </button>
-                  </div>
+          )}
 
-                  <div className="p-6 space-y-6">
-                    <div className="flex flex-col md:flex-row gap-6">
-                      {/* Solution Upload */}
-                      <div className="flex-1 space-y-2">
-                        <label className="block text-sm font-medium text-slate-700">Student Solution File</label>
-                        <input
-                          type="file"
-                          accept=".pdf,.txt,.docx"
-                          onChange={(e) => handleUpdateStudent(student.id, { solutionFile: e.target.files?.[0] || null })}
-                          className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 cursor-pointer border border-slate-200 rounded-md"
-                        />
-                        {(student.solutionFile || student.solutionFilename) && (
-                          <p className="text-xs text-emerald-600 flex items-center gap-1 mt-1">
-                            <CheckCircle className="w-3 h-3" /> 
-                            {student.solutionFile ? student.solutionFile.name : student.solutionFilename}
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Action Button */}
-                      <div className="flex items-end">
-                        <button
-                          onClick={() => handleGradeStudent(student)}
-                          disabled={student.status === 'grading' || (!student.solutionFile && !student.solutionUrl) || !assignmentFile}
-                          className={`flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg font-medium shadow-sm transition-all w-full md:w-auto ${
-                            student.status === 'grading'
-                              ? 'bg-indigo-100 text-indigo-400 cursor-not-allowed'
-                              : (!student.solutionFile && !student.solutionUrl) || !assignmentFile
-                              ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                              : 'bg-indigo-600 text-white hover:bg-indigo-700'
-                          }`}
-                        >
-                          {student.status === 'grading' ? (
-                            <>
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                              Grading...
-                            </>
-                          ) : student.status === 'graded' ? (
-                            <>
-                              <RefreshCw className="w-4 h-4" />
-                              Re-grade
-                            </>
-                          ) : (
-                            'Grade Assignment'
-                          )}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Error State */}
-                    {student.status === 'error' && (
-                      <div className="bg-red-50 text-red-700 p-4 rounded-lg flex items-start gap-3 border border-red-100">
-                        <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-                        <div>
-                          <h4 className="font-medium">Grading failed</h4>
-                          <p className="text-sm mt-1 text-red-600">There was an error processing the assignment. Please try again.</p>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Results */}
-                    {student.status === 'graded' && student.grade && (
-                      <div className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-5 space-y-4">
-                        <div className="flex items-center justify-between border-b border-indigo-100 pb-4">
-                          <h3 className="text-lg font-semibold text-indigo-900">Grading Results</h3>
-                          <div className="bg-indigo-600 text-white px-4 py-1.5 rounded-full font-bold shadow-sm">
-                            Grade: {student.grade}
-                          </div>
-                        </div>
-                        
-                        <div>
-                          <h4 className="text-sm font-medium text-indigo-900 mb-2">Justification</h4>
-                          <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed bg-white p-4 rounded-lg border border-indigo-50">
-                            {student.justification}
-                          </div>
-                        </div>
-
-                        {/* Feedback for Re-grading */}
-                        <div className="pt-4 border-t border-indigo-100">
-                          <label className="block text-sm font-medium text-indigo-900 mb-2">
-                            Provide Feedback & Re-grade
-                          </label>
-                          <p className="text-xs text-slate-500 mb-3">
-                            If you disagree with the grade or want the AI to consider specific points, provide feedback below and click "Re-grade".
-                          </p>
-                          <textarea
-                            rows={3}
-                            placeholder="e.g. The student actually addressed the second point in paragraph 3, please revise the score."
-                            value={student.feedback || ''}
-                            onChange={(e) => handleUpdateStudent(student.id, { feedback: e.target.value })}
-                            className="w-full bg-white border border-indigo-200 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none resize-y"
-                          />
-                        </div>
-                      </div>
-                    )}
+          <div className="grid gap-4">
+            {sessions.length === 0 && !isCreatingSession && (
+              <div className="text-center py-12 bg-white rounded-xl border border-dashed border-slate-300">
+                <BookOpen className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                <h3 className="text-lg font-medium text-slate-900">No sessions yet</h3>
+                <p className="text-slate-500 mt-1">Create your first grading session to get started.</p>
+              </div>
+            )}
+            {sessions.map(session => (
+              <div key={session.id} className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex justify-between items-center hover:border-indigo-300 transition-colors cursor-pointer" onClick={() => setActiveSession(session)}>
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-900">{session.name}</h3>
+                  <div className="text-sm text-slate-500 mt-1 flex items-center gap-4">
+                    <span className="flex items-center gap-1"><FileText className="w-4 h-4" /> {session.assignment_filename}</span>
+                    <span className="flex items-center gap-1"><Users className="w-4 h-4" /> Open Session</span>
                   </div>
                 </div>
-              ))}
+                <ArrowLeft className="w-5 h-5 text-slate-400 rotate-180" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // --- VIEW: Active Session ---
+  return (
+    <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
+      {/* Sidebar: Session Details */}
+      <div className="w-full md:w-80 bg-white border-r border-slate-200 p-6 flex flex-col h-screen overflow-y-auto sticky top-0">
+        <button 
+          onClick={() => setActiveSession(null)}
+          className="flex items-center gap-2 text-sm text-slate-500 hover:text-indigo-600 mb-6 transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" /> Back to Sessions
+        </button>
+
+        <h2 className="text-xl font-bold text-slate-900 mb-6">{activeSession.name}</h2>
+
+        <div className="space-y-6">
+          <div>
+            <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Assignment</h3>
+            <div className="flex items-center gap-2 text-sm text-emerald-600 bg-emerald-50 p-2 rounded border border-emerald-100">
+              <CheckCircle className="w-4 h-4" />
+              <span className="truncate" title={activeSession.assignment_filename}>{activeSession.assignment_filename}</span>
+            </div>
+          </div>
+
+          {activeSession.model_answer_filename && (
+            <div>
+              <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Model Answer</h3>
+              <div className="flex items-center gap-2 text-sm text-emerald-600 bg-emerald-50 p-2 rounded border border-emerald-100">
+                <CheckCircle className="w-4 h-4" />
+                <span className="truncate" title={activeSession.model_answer_filename}>{activeSession.model_answer_filename}</span>
+              </div>
+            </div>
+          )}
+
+          {activeSession.course_materials && activeSession.course_materials.length > 0 && (
+            <div>
+              <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Course Materials</h3>
+              <div className="space-y-2">
+                {activeSession.course_materials.map((cm, idx) => (
+                  <div key={idx} className="flex items-center gap-2 text-sm text-emerald-600 bg-emerald-50 p-2 rounded border border-emerald-100">
+                    <CheckCircle className="w-4 h-4 shrink-0" />
+                    <span className="truncate" title={cm.filename}>{cm.filename}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {activeSession.generic_instructions && (
+            <div>
+              <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Instructions</h3>
+              <div className="text-sm text-slate-700 bg-slate-50 p-3 rounded border border-slate-200 whitespace-pre-wrap">
+                {activeSession.generic_instructions}
+              </div>
             </div>
           )}
         </div>
-      </main>
+      </div>
+
+      {/* Main Content: Students */}
+      <div className="flex-1 p-8 overflow-y-auto">
+        <div className="max-w-4xl mx-auto">
+          <div className="flex justify-between items-center mb-8">
+            <div>
+              <h1 className="text-2xl font-bold text-slate-900">Students to Grade</h1>
+              <p className="text-slate-600 mt-1">Add students and upload their solutions to begin grading.</p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  const fb = prompt("Enter any global feedback for the AI (optional):");
+                  if (fb !== null) {
+                    handleGradeAll(true, fb);
+                  }
+                }}
+                disabled={students.length === 0}
+                className="bg-amber-100 text-amber-700 px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-amber-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <RefreshCw className="w-4 h-4" /> Regrade All
+              </button>
+              <button
+                onClick={() => handleGradeAll(false)}
+                disabled={!students.some(s => s.status === 'idle' || s.status === 'error')}
+                className="bg-emerald-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Play className="w-4 h-4" /> Grade All Ungraded
+              </button>
+              <button
+                onClick={() => setIsAddingStudent(true)}
+                className="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-indigo-700 transition-colors"
+              >
+                <Plus className="w-4 h-4" /> Add Student
+              </button>
+            </div>
+          </div>
+
+          {isAddingStudent && (
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-8">
+              <h2 className="text-lg font-semibold mb-4">Add Student Submission</h2>
+              <form onSubmit={handleAddStudent} className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Student Name</label>
+                    <input
+                      type="text"
+                      value={studentName}
+                      onChange={(e) => setStudentName(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-md"
+                      placeholder="e.g., Jane Doe"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Student ID (Optional)</label>
+                    <input
+                      type="text"
+                      value={studentId}
+                      onChange={(e) => setStudentId(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-md"
+                      placeholder="e.g., 12345678"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Student Solution File (PDF) *</label>
+                  <input
+                    type="file"
+                    required
+                    accept=".pdf"
+                    onChange={(e) => setSolutionFile(e.target.files?.[0] || null)}
+                    className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+                  />
+                </div>
+                <div className="flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingStudent(false)}
+                    className="px-4 py-2 text-slate-600 hover:text-slate-900"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmittingStudent || !solutionFile}
+                    className="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-indigo-700 disabled:opacity-50"
+                  >
+                    {isSubmittingStudent ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                    Add Student
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          <div className="space-y-6">
+            {students.length === 0 && !isAddingStudent && (
+              <div className="text-center py-12 bg-white rounded-xl border border-dashed border-slate-300">
+                <Users className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                <h3 className="text-lg font-medium text-slate-900">No students added yet</h3>
+                <p className="text-slate-500 mt-1">Click the button above to add a student submission.</p>
+              </div>
+            )}
+
+            {students.map(student => (
+              <div key={student.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="p-6 border-b border-slate-100 flex justify-between items-start bg-slate-50/50">
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-900">
+                      {student.name || 'Unnamed Student'}
+                      {student.student_id && <span className="text-sm font-normal text-slate-500 ml-2">({student.student_id})</span>}
+                    </h3>
+                    <div className="flex items-center gap-2 mt-2 text-sm text-slate-600">
+                      <FileText className="w-4 h-4" />
+                      {student.solution_filename}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {student.status === 'idle' && (
+                      <button
+                        onClick={() => handleGradeStudent(student.id)}
+                        className="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-indigo-700 transition-colors"
+                      >
+                        <Play className="w-4 h-4" /> Grade Assignment
+                      </button>
+                    )}
+                    {student.status === 'grading' && (
+                      <div className="flex items-center gap-2 text-indigo-600 bg-indigo-50 px-4 py-2 rounded-lg font-medium">
+                        <Loader2 className="w-4 h-4 animate-spin" /> Grading...
+                      </div>
+                    )}
+                    {student.status === 'graded' && (
+                      <div className="flex items-center gap-2 text-emerald-600 bg-emerald-50 px-4 py-2 rounded-lg font-medium">
+                        <CheckCircle className="w-4 h-4" /> Graded
+                      </div>
+                    )}
+                    {student.status === 'error' && (
+                      <div className="flex items-center gap-2 text-red-600 bg-red-50 px-4 py-2 rounded-lg font-medium">
+                        <AlertCircle className="w-4 h-4" /> Failed
+                      </div>
+                    )}
+                    <button
+                      onClick={() => handleDeleteStudent(student.id)}
+                      className="text-slate-400 hover:text-red-600 p-2 rounded-lg hover:bg-red-50 transition-colors"
+                      title="Remove Student"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                    </button>
+                  </div>
+                </div>
+
+                {student.status === 'error' && (
+                  <div className="p-4 bg-red-50 border-t border-red-100 text-red-700 text-sm flex items-start gap-2">
+                    <AlertCircle className="w-5 h-5 shrink-0" />
+                    <div>
+                      <p className="font-semibold">Grading failed</p>
+                      <p className="mt-1">There was an error processing the assignment. Please try again.</p>
+                      <button 
+                        onClick={() => handleGradeStudent(student.id)}
+                        className="mt-2 text-red-700 underline font-medium hover:text-red-800"
+                      >
+                        Retry Grading
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {student.status === 'graded' && (
+                  <div className="p-6 bg-white">
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                      <div className="md:col-span-1">
+                        <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 text-center h-full flex flex-col justify-center">
+                          <p className="text-sm font-medium text-slate-500 uppercase tracking-wider mb-1">Recommended Grade</p>
+                          <p className="text-3xl font-bold text-indigo-600">{student.grade}</p>
+                        </div>
+                      </div>
+                      <div className="md:col-span-3">
+                        <h4 className="text-sm font-medium text-slate-900 mb-2">Justification</h4>
+                        <div className="text-slate-700 text-sm leading-relaxed bg-slate-50 p-4 rounded-lg border border-slate-200 whitespace-pre-wrap">
+                          {student.justification}
+                        </div>
+                        <div className="mt-4 flex flex-col gap-3">
+                          <div className="flex flex-col gap-1">
+                            <label className="text-sm font-medium text-slate-700">Instructor Feedback for AI (for Regrading)</label>
+                            <textarea
+                              className="w-full border border-slate-300 rounded-lg p-2 text-sm"
+                              rows={2}
+                              placeholder="e.g., You deducted points for X, but X is actually correct according to the rubric."
+                              value={studentFeedbacks[student.id] || ''}
+                              onChange={(e) => setStudentFeedbacks(prev => ({ ...prev, [student.id]: e.target.value }))}
+                            />
+                          </div>
+                          <div className="flex justify-end gap-2">
+                            <button 
+                              onClick={() => handleGradeStudent(student.id, studentFeedbacks[student.id])}
+                              className="text-sm bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded font-medium flex items-center gap-1 hover:bg-indigo-200 transition-colors"
+                            >
+                              <Play className="w-4 h-4" /> Regrade This Student
+                            </button>
+                            <button 
+                              onClick={() => {
+                                if (confirm("This will regrade ALL students in this session using this feedback. Continue?")) {
+                                  handleGradeAll(true, `Regarding student ${student.name || student.id}: ${studentFeedbacks[student.id] || ''}`);
+                                }
+                              }}
+                              className="text-sm bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded font-medium flex items-center gap-1 hover:bg-emerald-200 transition-colors"
+                            >
+                              <RefreshCw className="w-4 h-4" /> Regrade ALL with this Feedback
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
+
+export default App;
