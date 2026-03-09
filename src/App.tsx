@@ -1,6 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FileUp, FileText, BookOpen, UserPlus, GraduationCap, CheckCircle, AlertCircle, Loader2, RefreshCw, MessageSquare } from 'lucide-react';
-import { gradeAssignment } from './services/geminiService';
 import { Student } from './types';
 
 export default function App() {
@@ -10,28 +9,74 @@ export default function App() {
   const [genericInstructions, setGenericInstructions] = useState<string>('');
   const [students, setStudents] = useState<Student[]>([]);
 
-  const handleAddStudent = () => {
-    setStudents([
-      ...students,
-      {
-        id: crypto.randomUUID(),
-        name: '',
-        studentId: '',
-        solutionFile: null,
-        grade: null,
-        justification: null,
-        feedback: null,
-        status: 'idle',
-      },
-    ]);
+  useEffect(() => {
+    fetch('/api/students')
+      .then(res => res.json())
+      .then(data => {
+        const mapped = data.map((s: any) => ({
+          id: s.id,
+          name: s.name || '',
+          studentId: s.student_id || '',
+          solutionFile: null,
+          solutionUrl: s.solution_url,
+          solutionFilename: s.solution_filename,
+          grade: s.grade,
+          justification: s.justification,
+          feedback: s.feedback || '',
+          status: s.status
+        }));
+        setStudents(mapped);
+      })
+      .catch(err => console.error('Failed to load students', err));
+  }, []);
+
+  const handleAddStudent = async () => {
+    const newStudent = {
+      id: crypto.randomUUID(),
+      name: '',
+      studentId: '',
+      solutionFile: null,
+      grade: null,
+      justification: null,
+      feedback: null,
+      status: 'idle' as const,
+    };
+    
+    setStudents([...students, newStudent]);
+
+    await fetch('/api/students', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: newStudent.id,
+        name: newStudent.name,
+        student_id: newStudent.studentId,
+        status: newStudent.status
+      })
+    });
   };
 
-  const handleUpdateStudent = (id: string, updates: Partial<Student>) => {
+  const handleUpdateStudent = async (id: string, updates: Partial<Student>) => {
     setStudents(students.map(s => (s.id === id ? { ...s, ...updates } : s)));
+
+    const dbUpdates: any = {};
+    if (updates.name !== undefined) dbUpdates.name = updates.name;
+    if (updates.studentId !== undefined) dbUpdates.student_id = updates.studentId;
+    if (updates.feedback !== undefined) dbUpdates.feedback = updates.feedback;
+    if (updates.status !== undefined) dbUpdates.status = updates.status;
+
+    if (Object.keys(dbUpdates).length > 0) {
+      await fetch(`/api/students/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dbUpdates)
+      });
+    }
   };
 
-  const handleRemoveStudent = (id: string) => {
+  const handleRemoveStudent = async (id: string) => {
     setStudents(students.filter(s => s.id !== id));
+    await fetch(`/api/students/${id}`, { method: 'DELETE' });
   };
 
   const handleGradeStudent = async (student: Student) => {
@@ -39,30 +84,43 @@ export default function App() {
       alert('Please upload an assignment file first.');
       return;
     }
-    if (!student.solutionFile) {
+    if (!student.solutionFile && !student.solutionUrl) {
       alert('Please upload a solution file for the student.');
       return;
     }
 
     handleUpdateStudent(student.id, { status: 'grading', grade: null, justification: null });
 
-    try {
-      const result = await gradeAssignment(
-        assignmentFile,
-        modelAnswerFile,
-        courseMaterials,
-        student.solutionFile,
-        student.name || 'Unknown',
-        student.studentId || 'Unknown',
-        student.feedback,
-        genericInstructions
-      );
+    const formData = new FormData();
+    formData.append('assignment', assignmentFile);
+    if (modelAnswerFile) formData.append('modelAnswer', modelAnswerFile);
+    courseMaterials.forEach(f => formData.append('courseMaterials', f));
+    if (student.solutionFile) formData.append('solution', student.solutionFile);
+    
+    formData.append('studentName', student.name);
+    formData.append('studentId', student.studentId);
+    formData.append('genericInstructions', genericInstructions);
+    if (student.feedback) formData.append('feedback', student.feedback);
 
-      handleUpdateStudent(student.id, {
-        status: 'graded',
-        grade: result.grade,
-        justification: result.justification,
+    try {
+      const res = await fetch(`/api/students/${student.id}/grade`, {
+        method: 'POST',
+        body: formData
       });
+      const data = await res.json();
+      
+      if (data.success) {
+        handleUpdateStudent(student.id, {
+          status: 'graded',
+          grade: data.grade,
+          justification: data.justification,
+          solutionUrl: data.solutionUrl,
+          solutionFilename: data.solutionFilename
+        });
+      } else {
+        console.error('Grading error:', data.error);
+        handleUpdateStudent(student.id, { status: 'error' });
+      }
     } catch (error) {
       console.error('Grading error:', error);
       handleUpdateStudent(student.id, { status: 'error' });
@@ -234,18 +292,23 @@ export default function App() {
                           onChange={(e) => handleUpdateStudent(student.id, { solutionFile: e.target.files?.[0] || null })}
                           className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 cursor-pointer border border-slate-200 rounded-md"
                         />
-                        {student.solutionFile && <p className="text-xs text-emerald-600 flex items-center gap-1 mt-1"><CheckCircle className="w-3 h-3" /> {student.solutionFile.name}</p>}
+                        {(student.solutionFile || student.solutionFilename) && (
+                          <p className="text-xs text-emerald-600 flex items-center gap-1 mt-1">
+                            <CheckCircle className="w-3 h-3" /> 
+                            {student.solutionFile ? student.solutionFile.name : student.solutionFilename}
+                          </p>
+                        )}
                       </div>
 
                       {/* Action Button */}
                       <div className="flex items-end">
                         <button
                           onClick={() => handleGradeStudent(student)}
-                          disabled={student.status === 'grading' || !student.solutionFile || !assignmentFile}
+                          disabled={student.status === 'grading' || (!student.solutionFile && !student.solutionUrl) || !assignmentFile}
                           className={`flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg font-medium shadow-sm transition-all w-full md:w-auto ${
                             student.status === 'grading'
                               ? 'bg-indigo-100 text-indigo-400 cursor-not-allowed'
-                              : !student.solutionFile || !assignmentFile
+                              : (!student.solutionFile && !student.solutionUrl) || !assignmentFile
                               ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
                               : 'bg-indigo-600 text-white hover:bg-indigo-700'
                           }`}
