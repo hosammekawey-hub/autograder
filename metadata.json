@@ -1,0 +1,5 @@
+{
+  "name": "AutoGrader",
+  "description": "An AI-powered web app to grade student assignments based on rubrics, model answers, and course materials.",
+  "requestFramePermissions": []
+}
