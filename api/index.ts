@@ -1,5 +1,4 @@
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
 import multer from 'multer';
 import { GoogleGenAI, Type } from '@google/genai';
 import { put } from '@vercel/blob';
@@ -7,9 +6,15 @@ import { sql } from '@vercel/postgres';
 import fs from 'fs';
 import path from 'path';
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 const app = express();
 app.use(express.json());
+
+// --- Debug Logging Middleware ---
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  next();
+});
 
 // --- Database Setup ---
 let db: any = null;
@@ -17,9 +22,11 @@ let isDbInitialized = false;
 
 async function initDb() {
   if (isDbInitialized) return;
+  console.log("Initializing Database...");
 
   try {
     if (process.env.POSTGRES_URL) {
+      console.log("Connecting to Vercel Postgres...");
       // Initialize Vercel Postgres Table
       await sql`
         CREATE TABLE IF NOT EXISTS students (
@@ -34,7 +41,9 @@ async function initDb() {
           status VARCHAR(50)
         )
       `;
+      console.log("Vercel Postgres connected and table verified.");
     } else {
+      console.log("Connecting to Local SQLite...");
       // Initialize Local SQLite dynamically so it doesn't crash Vercel
       const Database = (await import('better-sqlite3')).default;
       db = new Database('autograder.db');
@@ -51,10 +60,12 @@ async function initDb() {
           status TEXT
         )
       `);
+      console.log("Local SQLite connected.");
     }
     isDbInitialized = true;
-  } catch (error) {
+  } catch (error: any) {
     console.error('Database initialization error:', error);
+    throw error; // Throw so the API routes can catch it and return a 500 JSON response
   }
 }
 
@@ -88,9 +99,9 @@ app.get('/api/students', async (req, res) => {
       const students = db.prepare('SELECT * FROM students').all();
       res.json(students);
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error fetching students:', error);
-    res.status(500).json({ error: 'Failed to fetch students' });
+    res.status(500).json({ error: 'Failed to fetch students', details: error.message });
   }
 });
 
@@ -114,9 +125,9 @@ app.post('/api/students', async (req, res) => {
       `).run({ id, name: safeName, student_id: safeStudentId, status: safeStatus });
     }
     res.json({ success: true });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error adding student:', error);
-    res.status(500).json({ error: 'Failed to add student' });
+    res.status(500).json({ error: 'Failed to add student', details: error.message });
   }
 });
 
@@ -143,9 +154,9 @@ app.put('/api/students/:id', async (req, res) => {
       }
     }
     res.json({ success: true });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error updating student:', error);
-    res.status(500).json({ error: 'Failed to update student' });
+    res.status(500).json({ error: 'Failed to update student', details: error.message });
   }
 });
 
@@ -159,9 +170,9 @@ app.delete('/api/students/:id', async (req, res) => {
       db.prepare('DELETE FROM students WHERE id = ?').run(id);
     }
     res.json({ success: true });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error deleting student:', error);
-    res.status(500).json({ error: 'Failed to delete student' });
+    res.status(500).json({ error: 'Failed to delete student', details: error.message });
   }
 });
 
@@ -292,25 +303,35 @@ app.post('/api/students/:id/grade', upload.fields([
 
     res.json({ success: true, grade: result.grade, justification: result.justification, solutionUrl, solutionFilename });
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('Grading error:', error);
     if (process.env.POSTGRES_URL) {
       await sql`UPDATE students SET status = 'error' WHERE id = ${req.params.id}`;
     } else {
       db.prepare(`UPDATE students SET status = 'error' WHERE id = ?`).run(req.params.id);
     }
-    res.status(500).json({ error: 'Grading failed' });
+    res.status(500).json({ error: 'Grading failed', details: error.message });
   }
+});
+
+// --- Catch-all API Error Handler ---
+app.use('/api/*', (req, res) => {
+  res.status(404).json({ error: 'API route not found', path: req.path });
 });
 
 // --- Vite Middleware ---
 async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
+  if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
+    try {
+      const { createServer: createViteServer } = await import('vite');
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+    } catch (e) {
+      console.error("Failed to load vite dynamically", e);
+    }
   } else {
     app.use(express.static('dist'));
   }
