@@ -6,6 +6,10 @@ import { sql } from '@vercel/postgres';
 import fs from 'fs';
 import path from 'path';
 
+// Increase Vercel Serverless Function timeout to 60 seconds (maximum for Hobby plan)
+// Grading with Gemini and PDFs can take 15-30 seconds, which exceeds the default 10s timeout.
+export const maxDuration = 60;
+
 const PORT = process.env.PORT || 3000;
 const app = express();
 app.use(express.json());
@@ -186,7 +190,7 @@ app.post('/api/students/:id/grade', upload.fields([
     await initDb();
     const { id } = req.params;
     const { genericInstructions, feedback, studentName, studentId } = req.body;
-    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+    const files = (req.files as { [fieldname: string]: Express.Multer.File[] }) || {};
 
     const assignmentFile = files['assignment']?.[0];
     const modelAnswerFile = files['modelAnswer']?.[0];
@@ -291,7 +295,17 @@ app.post('/api/students/:id/grade', upload.fields([
       },
     });
 
-    const result = JSON.parse(response.text?.trim() || "{}");
+    // Safely parse JSON, stripping markdown backticks if Gemini accidentally includes them
+    let rawText = response.text?.trim() || "{}";
+    rawText = rawText.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '');
+    
+    let result;
+    try {
+      result = JSON.parse(rawText);
+    } catch (parseError) {
+      console.error("Failed to parse Gemini response:", rawText);
+      throw new Error("AI returned invalid JSON format.");
+    }
 
     // Update DB with results
     if (process.env.POSTGRES_URL) {
@@ -306,11 +320,14 @@ app.post('/api/students/:id/grade', upload.fields([
   } catch (error: any) {
     console.error('Grading error:', error);
     if (process.env.POSTGRES_URL) {
-      await sql`UPDATE students SET status = 'error' WHERE id = ${req.params.id}`;
+      await sql`UPDATE students SET status = 'error' WHERE id = ${req.params.id}`.catch(console.error);
     } else {
-      db.prepare(`UPDATE students SET status = 'error' WHERE id = ?`).run(req.params.id);
+      db?.prepare(`UPDATE students SET status = 'error' WHERE id = ?`).run(req.params.id);
     }
-    res.status(500).json({ error: 'Grading failed', details: error.message });
+    res.status(500).json({ 
+      error: 'Grading failed', 
+      details: error instanceof Error ? error.message : String(error) 
+    });
   }
 });
 

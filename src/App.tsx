@@ -118,11 +118,13 @@ export default function App() {
           solutionFilename: data.solutionFilename
         });
       } else {
-        console.error('Grading error:', data.error);
+        console.error('Grading error:', data.error, data.details);
+        alert(`Grading failed: ${data.details || data.error}`);
         handleUpdateStudent(student.id, { status: 'error' });
       }
     } catch (error) {
-      console.error('Grading error:', error);
+      console.error('Grading exception:', error);
+      alert(`Grading failed: ${error instanceof Error ? error.message : 'Network error'}`);
       handleUpdateStudent(student.id, { status: 'error' });
     }
   };
