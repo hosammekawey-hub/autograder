@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, FileText, CheckCircle, AlertCircle, Loader2, Plus, Trash2, ArrowLeft, BookOpen, Users, Play, RefreshCw } from 'lucide-react';
+import { Upload, FileText, CheckCircle, AlertCircle, Loader2, Plus, Trash2, ArrowLeft, BookOpen, Users, Play, RefreshCw, Edit2, X } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 
 type Session = {
@@ -46,6 +46,17 @@ function App() {
   const [solutionFile, setSolutionFile] = useState<File | null>(null);
   const [isSubmittingStudent, setIsSubmittingStudent] = useState(false);
   const [studentFeedbacks, setStudentFeedbacks] = useState<Record<string, string>>({});
+
+  // Update Session State
+  const [isUpdatingSession, setIsUpdatingSession] = useState(false);
+  const [newModelAnswerFile, setNewModelAnswerFile] = useState<File | null>(null);
+  const [newCourseMaterialsFiles, setNewCourseMaterialsFiles] = useState<FileList | null>(null);
+  const [newGenericInstructions, setNewGenericInstructions] = useState('');
+  const [isSubmittingUpdate, setIsSubmittingUpdate] = useState(false);
+
+  // Regrade Modal State
+  const [isRegradeModalOpen, setIsRegradeModalOpen] = useState(false);
+  const [regradeFeedback, setRegradeFeedback] = useState('');
 
   useEffect(() => {
     fetchSessions();
@@ -152,6 +163,52 @@ function App() {
       alert('Network error while adding student.');
     } finally {
       setIsSubmittingStudent(false);
+    }
+  };
+
+  const handleUpdateSession = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeSession) return;
+    
+    const hasInstructionsChanged = newGenericInstructions !== (activeSession.generic_instructions || '');
+    if (!newModelAnswerFile && !newCourseMaterialsFiles && !hasInstructionsChanged) return;
+
+    setIsSubmittingUpdate(true);
+    const formData = new FormData();
+    if (newModelAnswerFile) formData.append('modelAnswer', newModelAnswerFile);
+    if (newCourseMaterialsFiles) {
+      Array.from(newCourseMaterialsFiles).forEach(file => {
+        formData.append('courseMaterials', file);
+      });
+    }
+    if (hasInstructionsChanged) {
+      formData.append('genericInstructions', newGenericInstructions);
+    }
+
+    try {
+      const res = await fetch(`/api/sessions/${activeSession.id}`, {
+        method: 'PATCH',
+        body: formData,
+      });
+      if (res.ok) {
+        await fetchSessions();
+        // Update active session locally
+        const updatedSessionsRes = await fetch('/api/sessions');
+        const updatedSessions = await updatedSessionsRes.json();
+        const updatedActive = updatedSessions.find((s: Session) => s.id === activeSession.id);
+        if (updatedActive) setActiveSession(updatedActive);
+        
+        setIsUpdatingSession(false);
+        setNewModelAnswerFile(null);
+        setNewCourseMaterialsFiles(null);
+      } else {
+        const data = await res.json();
+        alert(`Failed to update session: ${data.details || data.error}`);
+      }
+    } catch (error) {
+      alert('Network error while updating session.');
+    } finally {
+      setIsSubmittingUpdate(false);
     }
   };
 
@@ -408,6 +465,67 @@ function App() {
               </div>
             </div>
           )}
+
+          {!isUpdatingSession ? (
+            <button
+              onClick={() => {
+                setIsUpdatingSession(true);
+                setNewGenericInstructions(activeSession.generic_instructions || '');
+              }}
+              className="w-full mt-4 bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg flex items-center justify-center gap-2 hover:bg-slate-50 transition-colors text-sm font-medium"
+            >
+              <Edit2 className="w-4 h-4" /> Update Session
+            </button>
+          ) : (
+            <form onSubmit={handleUpdateSession} className="mt-6 p-4 bg-slate-100 rounded-lg border border-slate-200 space-y-4">
+              <h3 className="text-sm font-semibold text-slate-800">Update Session</h3>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">New Model Answer (PDF)</label>
+                <input
+                  type="file"
+                  accept=".pdf"
+                  onChange={(e) => setNewModelAnswerFile(e.target.files?.[0] || null)}
+                  className="w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">New Course Materials (PDFs)</label>
+                <input
+                  type="file"
+                  multiple
+                  accept=".pdf"
+                  onChange={(e) => setNewCourseMaterialsFiles(e.target.files)}
+                  className="w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Instructions</label>
+                <textarea
+                  className="w-full border border-slate-300 rounded p-2 text-xs min-h-[80px]"
+                  value={newGenericInstructions}
+                  onChange={(e) => setNewGenericInstructions(e.target.value)}
+                  placeholder="e.g., Be lenient on question 2..."
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsUpdatingSession(false)}
+                  className="px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingUpdate || (!newModelAnswerFile && !newCourseMaterialsFiles && newGenericInstructions === (activeSession.generic_instructions || ''))}
+                  className="bg-indigo-600 text-white px-3 py-1.5 rounded text-xs font-medium flex items-center gap-1 hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {isSubmittingUpdate ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+                  Update
+                </button>
+              </div>
+            </form>
+          )}
         </div>
       </div>
 
@@ -421,12 +539,7 @@ function App() {
             </div>
             <div className="flex gap-3">
               <button
-                onClick={() => {
-                  const fb = prompt("Enter any global feedback for the AI (optional):");
-                  if (fb !== null) {
-                    handleGradeAll(true, fb);
-                  }
-                }}
+                onClick={() => setIsRegradeModalOpen(true)}
                 disabled={students.length === 0}
                 className="bg-amber-100 text-amber-700 px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-amber-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -630,6 +743,57 @@ function App() {
           </div>
         </div>
       </div>
+      {/* Regrade All Modal */}
+      {isRegradeModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full overflow-hidden">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+              <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                <RefreshCw className="w-5 h-5 text-amber-600" />
+                Regrade All Students
+              </h2>
+              <button 
+                onClick={() => setIsRegradeModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6">
+              <p className="text-sm text-slate-600 mb-4">
+                You are about to regrade all students in this session. You can optionally provide feedback or new instructions for the AI to consider during this regrade.
+              </p>
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                Global Feedback / Instructions (Optional)
+              </label>
+              <textarea
+                className="w-full border border-slate-300 rounded-lg p-3 text-sm min-h-[120px] focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none"
+                placeholder="e.g., Please be more lenient on question 3. Accept 'X' as a valid answer."
+                value={regradeFeedback}
+                onChange={(e) => setRegradeFeedback(e.target.value)}
+              />
+            </div>
+            <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+              <button
+                onClick={() => setIsRegradeModalOpen(false)}
+                className="px-4 py-2 text-slate-600 font-medium hover:text-slate-900 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  handleGradeAll(true, regradeFeedback);
+                  setIsRegradeModalOpen(false);
+                  setRegradeFeedback('');
+                }}
+                className="bg-amber-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-amber-700 transition-colors flex items-center gap-2"
+              >
+                <RefreshCw className="w-4 h-4" /> Start Regrade
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -215,6 +215,79 @@ app.post('/api/sessions', upload.fields([
   }
 });
 
+app.patch('/api/sessions/:sessionId', upload.fields([
+  { name: 'modelAnswer', maxCount: 1 },
+  { name: 'courseMaterials' }
+]), async (req, res) => {
+  try {
+    await initDb();
+    const { sessionId } = req.params;
+    const { genericInstructions } = req.body;
+    const files = (req.files as { [fieldname: string]: Express.Multer.File[] }) || {};
+    
+    const modelAnswerFile = files['modelAnswer']?.[0];
+    const courseMaterialsFiles = files['courseMaterials'] || [];
+
+    let updateFields: string[] = [];
+    let queryParams: any = { id: sessionId };
+    let pgValues: any[] = [];
+    let pgSetClauses: string[] = [];
+
+    if (modelAnswerFile) {
+      const modelAnswerUrl = await uploadFile(modelAnswerFile);
+      const modelAnswerFilename = modelAnswerFile.originalname;
+      updateFields.push('model_answer_url = @modelAnswerUrl', 'model_answer_filename = @modelAnswerFilename');
+      queryParams.modelAnswerUrl = modelAnswerUrl;
+      queryParams.modelAnswerFilename = modelAnswerFilename;
+      
+      pgSetClauses.push(`model_answer_url = $${pgValues.length + 1}`);
+      pgValues.push(modelAnswerUrl);
+      pgSetClauses.push(`model_answer_filename = $${pgValues.length + 1}`);
+      pgValues.push(modelAnswerFilename);
+    }
+
+    if (courseMaterialsFiles.length > 0) {
+      const courseMaterials = [];
+      for (const file of courseMaterialsFiles) {
+        courseMaterials.push({
+          url: await uploadFile(file),
+          filename: file.originalname
+        });
+      }
+      const cmJson = JSON.stringify(courseMaterials);
+      updateFields.push('course_materials = @cmJson');
+      queryParams.cmJson = cmJson;
+      
+      pgSetClauses.push(`course_materials = $${pgValues.length + 1}`);
+      pgValues.push(cmJson);
+    }
+
+    if (genericInstructions !== undefined) {
+      updateFields.push('generic_instructions = @genericInstructions');
+      queryParams.genericInstructions = genericInstructions;
+      
+      pgSetClauses.push(`generic_instructions = $${pgValues.length + 1}`);
+      pgValues.push(genericInstructions);
+    }
+
+    if (updateFields.length === 0) {
+      return res.json({ success: true, message: "No fields to update." });
+    }
+
+    if (process.env.POSTGRES_URL) {
+      pgValues.push(sessionId);
+      const query = `UPDATE sessions SET ${pgSetClauses.join(', ')} WHERE id = $${pgValues.length}`;
+      await sql.query(query, pgValues);
+    } else {
+      const query = `UPDATE sessions SET ${updateFields.join(', ')} WHERE id = @id`;
+      db.prepare(query).run(queryParams);
+    }
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to update session', details: error.message });
+  }
+});
+
 // 2. Students
 app.get('/api/sessions/:sessionId/students', async (req, res) => {
   try {
