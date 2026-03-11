@@ -538,7 +538,7 @@ app.post('/api/students/:id/grade', async (req, res) => {
     parts.push({ text: `--- STUDENT SOLUTION (Name: ${student.name}, ID: ${student.student_id}) ---` });
     parts.push({ inlineData: { data: solFile.base64, mimeType: solFile.mimeType } });
 
-    let promptText = `You are an expert academic grader. Grade the provided student solution based on the assignment instructions, rubric, and optionally the model answer and course materials. Provide a recommended grade and a detailed justification.\n\nCRITICAL INSTRUCTION FOR GRADING DETAILS: You MUST break down the grading into the most atomic sub-questions possible. If a question has multiple parts (e.g., Q1 has parts a, b, and c), you MUST create a separate grading detail entry for Q1.a, Q1.b, and Q1.c. DO NOT group them together under a single Q1 entry. Every single sub-part must have its own row in the grading_details array.`;
+    let promptText = `You are an expert academic grader. Grade the provided student solution based on the assignment instructions, rubric, and optionally the model answer and course materials. Provide a recommended grade and a detailed justification.\n\nCRITICAL INSTRUCTION FOR GRADING DETAILS: You MUST break down the grading into the most atomic sub-questions possible. If a question has multiple parts (e.g., Q1 has parts a, b, and c), you MUST create a separate grading detail entry for Q1.a, Q1.b, and Q1.c. DO NOT group them together under a single Q1 entry. Every single sub-part must have its own row in the grading_details array.\n\nCRITICAL INSTRUCTION FOR OVERALL GRADE: The overall 'grade' field MUST be the exact mathematical sum of the individual grades given in the 'grading_details' array. Double-check your math to ensure the total matches the sum of the parts.`;
     if (session.generic_instructions?.trim()) {
       promptText += `\n\nGeneral Instructions for Grading:\n"${session.generic_instructions}"`;
     }
@@ -574,7 +574,7 @@ app.post('/api/students/:id/grade', async (req, res) => {
                   model_answer: { type: Type.STRING },
                   student_answer: { type: Type.STRING },
                   identified_issue: { type: Type.STRING, description: "Identified issue, or 'None' if correct" },
-                  suggested_grade: { type: Type.STRING }
+                  suggested_grade: { type: Type.STRING, description: "The numeric points awarded for this sub-question (e.g., '5', '2.5')." }
                 },
                 required: ["question_number", "question_text", "model_answer", "student_answer", "identified_issue", "suggested_grade"]
               }
@@ -705,7 +705,7 @@ app.post('/api/sessions/:sessionId/grade-all', async (req, res) => {
       parts.push({ text: `--- END OF STUDENT SOLUTION (ID: ${student.id}) ---` });
     }
 
-    let promptText = `You are an expert academic grader. Grade ALL the provided student solutions based on the assignment instructions, rubric, and optionally the model answer and course materials. Provide a recommended grade and a detailed justification for EACH student.\n\nCRITICAL INSTRUCTION FOR GRADING DETAILS: You MUST break down the grading into the most atomic sub-questions possible. If a question has multiple parts (e.g., Q1 has parts a, b, and c), you MUST create a separate grading detail entry for Q1.a, Q1.b, and Q1.c. DO NOT group them together under a single Q1 entry. Every single sub-part must have its own row in the grading_details array.`;
+    let promptText = `You are an expert academic grader. Grade ALL the provided student solutions based on the assignment instructions, rubric, and optionally the model answer and course materials. Provide a recommended grade and a detailed justification for EACH student.\n\nCRITICAL INSTRUCTION FOR GRADING DETAILS: You MUST break down the grading into the most atomic sub-questions possible. If a question has multiple parts (e.g., Q1 has parts a, b, and c), you MUST create a separate grading detail entry for Q1.a, Q1.b, and Q1.c. DO NOT group them together under a single Q1 entry. Every single sub-part must have its own row in the grading_details array.\n\nCRITICAL INSTRUCTION FOR OVERALL GRADE: The overall 'grade' field MUST be the exact mathematical sum of the individual grades given in the 'grading_details' array. Double-check your math to ensure the total matches the sum of the parts.`;
     if (session.generic_instructions?.trim()) {
       promptText += `\n\nGeneral Instructions for Grading:\n"${session.generic_instructions}"`;
     }
@@ -743,7 +743,7 @@ app.post('/api/sessions/:sessionId/grade-all', async (req, res) => {
                     model_answer: { type: Type.STRING },
                     student_answer: { type: Type.STRING },
                     identified_issue: { type: Type.STRING, description: "Identified issue, or 'None' if correct" },
-                    suggested_grade: { type: Type.STRING }
+                    suggested_grade: { type: Type.STRING, description: "The numeric points awarded for this sub-question (e.g., '5', '2.5')." }
                   },
                   required: ["question_number", "question_text", "model_answer", "student_answer", "identified_issue", "suggested_grade"]
                 }
