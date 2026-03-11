@@ -24,9 +24,132 @@ type Student = {
   solution_filename: string;
   grade?: string;
   justification?: string;
+  grading_details?: string;
   feedback?: string;
   status: 'idle' | 'grading' | 'graded' | 'error';
 };
+
+type GradingDetail = {
+  question_number: string;
+  question_text: string;
+  model_answer: string;
+  student_answer: string;
+  identified_issue: string;
+  suggested_grade: string;
+};
+
+function StudentGradingDetails({ student, onUpdate }: { student: Student, onUpdate: (studentId: string, updates: Partial<Student>) => void }) {
+  const [details, setDetails] = useState<GradingDetail[]>([]);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedGrade, setEditedGrade] = useState(student.grade || '');
+
+  useEffect(() => {
+    if (student.grading_details) {
+      try {
+        setDetails(JSON.parse(student.grading_details));
+      } catch (e) {
+        console.error("Failed to parse grading details", e);
+      }
+    }
+  }, [student.grading_details]);
+
+  const handleDetailChange = (index: number, field: keyof GradingDetail, value: string) => {
+    const newDetails = [...details];
+    newDetails[index] = { ...newDetails[index], [field]: value };
+    setDetails(newDetails);
+  };
+
+  const handleSave = () => {
+    onUpdate(student.id, {
+      grade: editedGrade,
+      grading_details: JSON.stringify(details)
+    });
+    setIsEditing(false);
+  };
+
+  if (!student.grading_details || details.length === 0) return null;
+
+  return (
+    <div className="mt-6 border-t border-slate-200 pt-6">
+      <div className="flex justify-between items-center mb-4">
+        <h4 className="text-lg font-semibold text-slate-900">Detailed Grading Report</h4>
+        {!isEditing ? (
+          <button onClick={() => { setIsEditing(true); setEditedGrade(student.grade || ''); }} className="text-sm bg-slate-100 text-slate-700 px-3 py-1.5 rounded font-medium flex items-center gap-1 hover:bg-slate-200 transition-colors">
+            <Edit2 className="w-4 h-4" /> Edit Report
+          </button>
+        ) : (
+          <div className="flex items-center gap-2">
+            <button onClick={() => setIsEditing(false)} className="text-sm text-slate-500 hover:text-slate-700 font-medium px-3 py-1.5">Cancel</button>
+            <button onClick={handleSave} className="text-sm bg-indigo-600 text-white px-3 py-1.5 rounded font-medium hover:bg-indigo-700 transition-colors">Save Changes</button>
+          </div>
+        )}
+      </div>
+
+      {isEditing && (
+        <div className="mb-4 flex items-center gap-4 bg-indigo-50 p-4 rounded-lg border border-indigo-100">
+          <label className="text-sm font-medium text-indigo-900">Overall Grade Override:</label>
+          <input 
+            type="text" 
+            value={editedGrade} 
+            onChange={(e) => setEditedGrade(e.target.value)}
+            className="border border-indigo-200 rounded px-3 py-1.5 text-sm font-bold text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+        </div>
+      )}
+
+      <div className="overflow-x-auto rounded-lg border border-slate-200">
+        <table className="w-full text-sm text-left text-slate-600 border-collapse">
+          <thead className="text-xs text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
+            <tr>
+              <th className="px-4 py-3 font-medium border-r border-slate-200">Q#</th>
+              <th className="px-4 py-3 font-medium border-r border-slate-200">Question Text</th>
+              <th className="px-4 py-3 font-medium border-r border-slate-200">Model Answer</th>
+              <th className="px-4 py-3 font-medium border-r border-slate-200">Student Answer</th>
+              <th className="px-4 py-3 font-medium border-r border-slate-200">Identified Issue</th>
+              <th className="px-4 py-3 font-medium">Grade</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-200">
+            {details.map((detail, idx) => (
+              <tr key={idx} className="hover:bg-slate-50/50 align-top">
+                <td className="px-4 py-3 font-medium text-slate-900 whitespace-nowrap border-r border-slate-200">{detail.question_number}</td>
+                <td className="px-4 py-3 min-w-[200px] border-r border-slate-200">{detail.question_text}</td>
+                <td className="px-4 py-3 min-w-[200px] border-r border-slate-200">{detail.model_answer}</td>
+                <td className="px-4 py-3 min-w-[200px] border-r border-slate-200">{detail.student_answer}</td>
+                <td className="px-4 py-3 min-w-[200px] border-r border-slate-200">
+                  {isEditing ? (
+                    <textarea 
+                      value={detail.identified_issue} 
+                      onChange={(e) => handleDetailChange(idx, 'identified_issue', e.target.value)}
+                      className="w-full border border-slate-300 rounded p-1.5 text-sm"
+                      rows={3}
+                    />
+                  ) : (
+                    <span className={detail.identified_issue.toLowerCase() === 'none' ? 'text-emerald-600 font-medium' : 'text-amber-700'}>
+                      {detail.identified_issue}
+                    </span>
+                  )}
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  {isEditing ? (
+                    <input 
+                      type="text" 
+                      value={detail.suggested_grade} 
+                      onChange={(e) => handleDetailChange(idx, 'suggested_grade', e.target.value)}
+                      className="w-20 border border-slate-300 rounded p-1.5 text-sm font-medium"
+                    />
+                  ) : (
+                    <span className="font-medium text-slate-900">{detail.suggested_grade}</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -305,6 +428,24 @@ function App() {
       setStudents(prev => prev.filter(s => s.id !== studentId));
     } catch (error) {
       console.error('Failed to delete student', error);
+    }
+  };
+
+  const handleUpdateStudentGrade = async (studentId: string, updates: Partial<Student>) => {
+    try {
+      const res = await fetch(`/api/students/${studentId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates)
+      });
+      if (res.ok) {
+        setStudents(prev => prev.map(s => s.id === studentId ? { ...s, ...updates } : s));
+      } else {
+        alert('Failed to update student grade');
+      }
+    } catch (error) {
+      console.error(error);
+      alert('Network error while updating grade');
     }
   };
 
@@ -881,6 +1022,7 @@ function App() {
                         </div>
                       </div>
                     </div>
+                    <StudentGradingDetails student={student} onUpdate={handleUpdateStudentGrade} />
                   </div>
                 )}
               </div>

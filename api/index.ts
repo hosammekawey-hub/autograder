@@ -58,6 +58,7 @@ async function initDb() {
       `;
       // Attempt to add session_id if migrating from old schema
       try { await sql`ALTER TABLE students ADD COLUMN session_id VARCHAR(255)`; } catch (e) {}
+      try { await sql`ALTER TABLE students ADD COLUMN grading_details TEXT`; } catch (e) {}
       try { await sql`ALTER TABLE sessions ADD COLUMN llm_model VARCHAR(255)`; } catch (e) {}
       console.log("Vercel Postgres connected.");
     } else {
@@ -92,6 +93,7 @@ async function initDb() {
         )
       `);
       try { db.exec(`ALTER TABLE students ADD COLUMN session_id TEXT`); } catch (e) {}
+      try { db.exec(`ALTER TABLE students ADD COLUMN grading_details TEXT`); } catch (e) {}
       try { db.exec(`ALTER TABLE sessions ADD COLUMN llm_model TEXT`); } catch (e) {}
       console.log("Local SQLite connected.");
     }
@@ -430,6 +432,7 @@ app.put('/api/students/:id', async (req, res) => {
       if (updates.feedback !== undefined) await sql`UPDATE students SET feedback = ${updates.feedback} WHERE id = ${id}`;
       if (updates.grade !== undefined) await sql`UPDATE students SET grade = ${updates.grade} WHERE id = ${id}`;
       if (updates.justification !== undefined) await sql`UPDATE students SET justification = ${updates.justification} WHERE id = ${id}`;
+      if (updates.grading_details !== undefined) await sql`UPDATE students SET grading_details = ${updates.grading_details} WHERE id = ${id}`;
     } else {
       const setClause = Object.keys(updates).map(k => `${k} = @${k}`).join(', ');
       if (setClause) {
@@ -561,8 +564,23 @@ app.post('/api/students/:id/grade', async (req, res) => {
           properties: {
             grade: { type: Type.STRING },
             justification: { type: Type.STRING },
+            grading_details: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  question_number: { type: Type.STRING },
+                  question_text: { type: Type.STRING },
+                  model_answer: { type: Type.STRING },
+                  student_answer: { type: Type.STRING },
+                  identified_issue: { type: Type.STRING, description: "Identified issue, or 'None' if correct" },
+                  suggested_grade: { type: Type.STRING }
+                },
+                required: ["question_number", "question_text", "model_answer", "student_answer", "identified_issue", "suggested_grade"]
+              }
+            }
           },
-          required: ["grade", "justification"],
+          required: ["grade", "justification", "grading_details"],
         },
       },
     });
@@ -577,13 +595,13 @@ app.post('/api/students/:id/grade', async (req, res) => {
     }
 
     if (process.env.POSTGRES_URL) {
-      await sql`UPDATE students SET status = 'graded', grade = ${result.grade}, justification = ${result.justification} WHERE id = ${id}`;
+      await sql`UPDATE students SET status = 'graded', grade = ${result.grade}, justification = ${result.justification}, grading_details = ${JSON.stringify(result.grading_details)} WHERE id = ${id}`;
     } else {
-      db.prepare(`UPDATE students SET status = 'graded', grade = @grade, justification = @justification WHERE id = @id`)
-        .run({ id, grade: result.grade, justification: result.justification });
+      db.prepare(`UPDATE students SET status = 'graded', grade = @grade, justification = @justification, grading_details = @grading_details WHERE id = @id`)
+        .run({ id, grade: result.grade, justification: result.justification, grading_details: JSON.stringify(result.grading_details) });
     }
 
-    res.json({ success: true, grade: result.grade, justification: result.justification });
+    res.json({ success: true, grade: result.grade, justification: result.justification, grading_details: result.grading_details });
 
   } catch (error: any) {
     console.error('Grading error:', error);
@@ -715,8 +733,23 @@ app.post('/api/sessions/:sessionId/grade-all', async (req, res) => {
               id: { type: Type.STRING, description: "The exact ID of the student provided in the prompt (e.g., the UUID)" },
               grade: { type: Type.STRING },
               justification: { type: Type.STRING },
+              grading_details: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    question_number: { type: Type.STRING },
+                    question_text: { type: Type.STRING },
+                    model_answer: { type: Type.STRING },
+                    student_answer: { type: Type.STRING },
+                    identified_issue: { type: Type.STRING, description: "Identified issue, or 'None' if correct" },
+                    suggested_grade: { type: Type.STRING }
+                  },
+                  required: ["question_number", "question_text", "model_answer", "student_answer", "identified_issue", "suggested_grade"]
+                }
+              }
             },
-            required: ["id", "grade", "justification"],
+            required: ["id", "grade", "justification", "grading_details"],
           }
         },
       },
@@ -734,10 +767,10 @@ app.post('/api/sessions/:sessionId/grade-all', async (req, res) => {
     // Update each student
     for (const result of results) {
       if (process.env.POSTGRES_URL) {
-        await sql`UPDATE students SET status = 'graded', grade = ${result.grade}, justification = ${result.justification} WHERE id = ${result.id}`;
+        await sql`UPDATE students SET status = 'graded', grade = ${result.grade}, justification = ${result.justification}, grading_details = ${JSON.stringify(result.grading_details)} WHERE id = ${result.id}`;
       } else {
-        db.prepare(`UPDATE students SET status = 'graded', grade = @grade, justification = @justification WHERE id = @id`)
-          .run({ id: result.id, grade: result.grade, justification: result.justification });
+        db.prepare(`UPDATE students SET status = 'graded', grade = @grade, justification = @justification, grading_details = @grading_details WHERE id = @id`)
+          .run({ id: result.id, grade: result.grade, justification: result.justification, grading_details: JSON.stringify(result.grading_details) });
       }
     }
 
