@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import { GoogleGenAI, Type } from '@google/genai';
-import { put } from '@vercel/blob';
+import { put, del } from '@vercel/blob';
 import { sql } from '@vercel/postgres';
 import fs from 'fs';
 import path from 'path';
@@ -119,6 +119,23 @@ async function uploadFile(file: Express.Multer.File): Promise<string> {
   }
 }
 
+async function deleteFile(url: string | null | undefined) {
+  if (!url) return;
+  try {
+    if (process.env.BLOB_READ_WRITE_TOKEN && url.startsWith('http')) {
+      await del(url);
+    } else if (!process.env.BLOB_READ_WRITE_TOKEN && url.startsWith('/uploads/')) {
+      const filename = url.replace('/uploads/', '');
+      const filepath = path.join(process.cwd(), 'uploads', filename);
+      if (fs.existsSync(filepath)) {
+        fs.unlinkSync(filepath);
+      }
+    }
+  } catch (error) {
+    console.error(`Failed to delete file at ${url}:`, error);
+  }
+}
+
 async function getFileBase64(url: string, filename: string): Promise<{ base64: string, mimeType: string }> {
   let base64 = '';
   let mimeType = filename.endsWith('.pdf') ? 'application/pdf' : 'text/plain';
@@ -229,6 +246,16 @@ app.patch('/api/sessions/:sessionId', upload.fields([
     const { genericInstructions, llmModel, deleteModelAnswer, deletedCourseMaterials } = req.body;
     const files = (req.files as { [fieldname: string]: Express.Multer.File[] }) || {};
     
+    // Fetch current session to get old URLs
+    let session;
+    if (process.env.POSTGRES_URL) {
+      const { rows } = await sql`SELECT * FROM sessions WHERE id = ${sessionId}`;
+      session = rows[0];
+    } else {
+      session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId);
+    }
+    if (!session) throw new Error("Session not found");
+
     const assignmentFile = files['assignment']?.[0];
     const modelAnswerFile = files['modelAnswer']?.[0];
     const courseMaterialsFiles = files['courseMaterials'] || [];
@@ -239,6 +266,7 @@ app.patch('/api/sessions/:sessionId', upload.fields([
     let pgSetClauses: string[] = [];
 
     if (assignmentFile) {
+      if (session.assignment_url) await deleteFile(session.assignment_url);
       const assignmentUrl = await uploadFile(assignmentFile);
       const assignmentFilename = assignmentFile.originalname;
       updateFields.push('assignment_url = @assignmentUrl', 'assignment_filename = @assignmentFilename');
@@ -252,6 +280,7 @@ app.patch('/api/sessions/:sessionId', upload.fields([
     }
 
     if (modelAnswerFile) {
+      if (session.model_answer_url) await deleteFile(session.model_answer_url);
       const modelAnswerUrl = await uploadFile(modelAnswerFile);
       const modelAnswerFilename = modelAnswerFile.originalname;
       updateFields.push('model_answer_url = @modelAnswerUrl', 'model_answer_filename = @modelAnswerFilename');
@@ -263,6 +292,7 @@ app.patch('/api/sessions/:sessionId', upload.fields([
       pgSetClauses.push(`model_answer_filename = $${pgValues.length + 1}`);
       pgValues.push(modelAnswerFilename);
     } else if (deleteModelAnswer === 'true') {
+      if (session.model_answer_url) await deleteFile(session.model_answer_url);
       updateFields.push('model_answer_url = NULL', 'model_answer_filename = NULL');
       pgSetClauses.push(`model_answer_url = NULL`);
       pgSetClauses.push(`model_answer_filename = NULL`);
@@ -271,14 +301,6 @@ app.patch('/api/sessions/:sessionId', upload.fields([
     // Handle course materials
     let currentMaterials: any[] = [];
     if (courseMaterialsFiles.length > 0 || deletedCourseMaterials) {
-      // Fetch current materials first
-      let session;
-      if (process.env.POSTGRES_URL) {
-        const { rows } = await sql`SELECT course_materials FROM sessions WHERE id = ${sessionId}`;
-        session = rows[0];
-      } else {
-        session = db.prepare('SELECT course_materials FROM sessions WHERE id = ?').get(sessionId);
-      }
       if (session && session.course_materials) {
         currentMaterials = JSON.parse(session.course_materials);
       }
@@ -290,6 +312,10 @@ app.patch('/api/sessions/:sessionId', upload.fields([
           deletedUrls = JSON.parse(deletedCourseMaterials);
         } catch (e) {
           if (typeof deletedCourseMaterials === 'string') deletedUrls = [deletedCourseMaterials];
+        }
+        
+        for (const url of deletedUrls) {
+          await deleteFile(url);
         }
         currentMaterials = currentMaterials.filter(m => !deletedUrls.includes(m.url));
       }
@@ -420,6 +446,20 @@ app.delete('/api/students/:id', async (req, res) => {
   try {
     await initDb();
     const { id } = req.params;
+    
+    // Fetch student to get the solution URL
+    let student;
+    if (process.env.POSTGRES_URL) {
+      const { rows } = await sql`SELECT solution_url FROM students WHERE id = ${id}`;
+      student = rows[0];
+    } else {
+      student = db.prepare('SELECT solution_url FROM students WHERE id = ?').get(id);
+    }
+
+    if (student && student.solution_url) {
+      await deleteFile(student.solution_url);
+    }
+
     if (process.env.POSTGRES_URL) {
       await sql`DELETE FROM students WHERE id = ${id}`;
     } else {
