@@ -9,6 +9,7 @@ type Session = {
   model_answer_filename?: string;
   course_materials: { url: string, filename: string }[];
   generic_instructions?: string;
+  llm_model?: string;
   created_at: string;
 };
 
@@ -37,6 +38,7 @@ function App() {
   const [modelAnswerFile, setModelAnswerFile] = useState<File | null>(null);
   const [courseMaterialsFiles, setCourseMaterialsFiles] = useState<FileList | null>(null);
   const [genericInstructions, setGenericInstructions] = useState('');
+  const [llmModel, setLlmModel] = useState('gemini-3.1-pro-preview');
   const [isSubmittingSession, setIsSubmittingSession] = useState(false);
 
   // Add Student State
@@ -49,9 +51,13 @@ function App() {
 
   // Update Session State
   const [isUpdatingSession, setIsUpdatingSession] = useState(false);
+  const [newAssignmentFile, setNewAssignmentFile] = useState<File | null>(null);
   const [newModelAnswerFile, setNewModelAnswerFile] = useState<File | null>(null);
   const [newCourseMaterialsFiles, setNewCourseMaterialsFiles] = useState<FileList | null>(null);
   const [newGenericInstructions, setNewGenericInstructions] = useState('');
+  const [newLlmModel, setNewLlmModel] = useState('gemini-3.1-pro-preview');
+  const [deletedCourseMaterials, setDeletedCourseMaterials] = useState<string[]>([]);
+  const [deleteModelAnswer, setDeleteModelAnswer] = useState(false);
   const [isSubmittingUpdate, setIsSubmittingUpdate] = useState(false);
 
   // Regrade Modal State
@@ -107,6 +113,7 @@ function App() {
       });
     }
     formData.append('genericInstructions', genericInstructions);
+    formData.append('llmModel', llmModel);
 
     try {
       const res = await fetch('/api/sessions', {
@@ -122,6 +129,7 @@ function App() {
         setModelAnswerFile(null);
         setCourseMaterialsFiles(null);
         setGenericInstructions('');
+        setLlmModel('gemini-3.1-pro-preview');
       } else {
         const data = await res.json();
         alert(`Failed to create session: ${data.details || data.error}`);
@@ -171,10 +179,13 @@ function App() {
     if (!activeSession) return;
     
     const hasInstructionsChanged = newGenericInstructions !== (activeSession.generic_instructions || '');
-    if (!newModelAnswerFile && !newCourseMaterialsFiles && !hasInstructionsChanged) return;
+    const hasModelChanged = newLlmModel !== (activeSession.llm_model || 'gemini-3.1-pro-preview');
+    
+    if (!newAssignmentFile && !newModelAnswerFile && !newCourseMaterialsFiles && !hasInstructionsChanged && !hasModelChanged && deletedCourseMaterials.length === 0 && !deleteModelAnswer) return;
 
     setIsSubmittingUpdate(true);
     const formData = new FormData();
+    if (newAssignmentFile) formData.append('assignment', newAssignmentFile);
     if (newModelAnswerFile) formData.append('modelAnswer', newModelAnswerFile);
     if (newCourseMaterialsFiles) {
       Array.from(newCourseMaterialsFiles).forEach(file => {
@@ -183,6 +194,15 @@ function App() {
     }
     if (hasInstructionsChanged) {
       formData.append('genericInstructions', newGenericInstructions);
+    }
+    if (hasModelChanged) {
+      formData.append('llmModel', newLlmModel);
+    }
+    if (deletedCourseMaterials.length > 0) {
+      formData.append('deletedCourseMaterials', JSON.stringify(deletedCourseMaterials));
+    }
+    if (deleteModelAnswer) {
+      formData.append('deleteModelAnswer', 'true');
     }
 
     try {
@@ -199,8 +219,11 @@ function App() {
         if (updatedActive) setActiveSession(updatedActive);
         
         setIsUpdatingSession(false);
+        setNewAssignmentFile(null);
         setNewModelAnswerFile(null);
         setNewCourseMaterialsFiles(null);
+        setDeletedCourseMaterials([]);
+        setDeleteModelAnswer(false);
       } else {
         const data = await res.json();
         alert(`Failed to update session: ${data.details || data.error}`);
@@ -363,6 +386,19 @@ function App() {
                     placeholder="e.g., Be brief, focus on code quality..."
                   />
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">LLM Model</label>
+                  <select
+                    value={llmModel}
+                    onChange={(e) => setLlmModel(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-md"
+                  >
+                    <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Best Quality)</option>
+                    <option value="gemini-3.0-pro-preview">Gemini 3.0 Pro</option>
+                    <option value="gemini-3.1-flash-preview">Gemini 3.1 Flash</option>
+                    <option value="gemini-3-flash-preview">Gemini 3 Flash (Fastest)</option>
+                  </select>
+                </div>
                 <div className="flex justify-end gap-3">
                   <button
                     type="button"
@@ -466,11 +502,25 @@ function App() {
             </div>
           )}
 
+          <div>
+            <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">LLM Model</h3>
+            <div className="text-sm text-slate-700 bg-slate-50 p-2 rounded border border-slate-200">
+              {activeSession.llm_model === 'gemini-3.1-pro-preview' ? 'Gemini 3.1 Pro' : 
+               activeSession.llm_model === 'gemini-3.0-pro-preview' ? 'Gemini 3.0 Pro' : 
+               activeSession.llm_model === 'gemini-3.1-flash-preview' ? 'Gemini 3.1 Flash' : 
+               activeSession.llm_model === 'gemini-3-flash-preview' ? 'Gemini 3 Flash' : 
+               (activeSession.llm_model || 'Gemini 3.1 Pro')}
+            </div>
+          </div>
+
           {!isUpdatingSession ? (
             <button
               onClick={() => {
                 setIsUpdatingSession(true);
                 setNewGenericInstructions(activeSession.generic_instructions || '');
+                setNewLlmModel(activeSession.llm_model || 'gemini-3.1-pro-preview');
+                setDeletedCourseMaterials([]);
+                setDeleteModelAnswer(false);
               }}
               className="w-full mt-4 bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg flex items-center justify-center gap-2 hover:bg-slate-50 transition-colors text-sm font-medium"
             >
@@ -480,7 +530,24 @@ function App() {
             <form onSubmit={handleUpdateSession} className="mt-6 p-4 bg-slate-100 rounded-lg border border-slate-200 space-y-4">
               <h3 className="text-sm font-semibold text-slate-800">Update Session</h3>
               <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">New Model Answer (PDF)</label>
+                <label className="block text-xs font-medium text-slate-700 mb-1">New Assignment (PDF)</label>
+                <input
+                  type="file"
+                  accept=".pdf"
+                  onChange={(e) => setNewAssignmentFile(e.target.files?.[0] || null)}
+                  className="w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1 flex justify-between">
+                  New Model Answer (PDF)
+                  {activeSession.model_answer_filename && !deleteModelAnswer && (
+                    <button type="button" onClick={() => setDeleteModelAnswer(true)} className="text-red-600 hover:text-red-800 text-xs">Delete Existing</button>
+                  )}
+                  {deleteModelAnswer && (
+                    <span className="text-red-600 text-xs italic">Will be deleted</span>
+                  )}
+                </label>
                 <input
                   type="file"
                   accept=".pdf"
@@ -489,7 +556,25 @@ function App() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">New Course Materials (PDFs)</label>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Course Materials</label>
+                {activeSession.course_materials && activeSession.course_materials.length > 0 && (
+                  <div className="mb-2 space-y-1">
+                    {activeSession.course_materials.map((cm, idx) => {
+                      const isDeleted = deletedCourseMaterials.includes(cm.url);
+                      return (
+                        <div key={idx} className={`flex items-center justify-between text-xs p-1 rounded border ${isDeleted ? 'bg-red-50 border-red-100 text-red-500 line-through' : 'bg-white border-slate-200 text-slate-600'}`}>
+                          <span className="truncate" title={cm.filename}>{cm.filename}</span>
+                          {!isDeleted ? (
+                            <button type="button" onClick={() => setDeletedCourseMaterials([...deletedCourseMaterials, cm.url])} className="text-red-500 hover:text-red-700 p-1"><Trash2 className="w-3 h-3" /></button>
+                          ) : (
+                            <button type="button" onClick={() => setDeletedCourseMaterials(deletedCourseMaterials.filter(url => url !== cm.url))} className="text-slate-500 hover:text-slate-700 p-1 text-[10px]">Undo</button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <label className="block text-xs font-medium text-slate-700 mb-1">Add New Course Materials (PDFs)</label>
                 <input
                   type="file"
                   multiple
@@ -497,6 +582,19 @@ function App() {
                   onChange={(e) => setNewCourseMaterialsFiles(e.target.files)}
                   className="w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
                 />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">LLM Model</label>
+                <select
+                  value={newLlmModel}
+                  onChange={(e) => setNewLlmModel(e.target.value)}
+                  className="w-full border border-slate-300 rounded p-2 text-xs"
+                >
+                  <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Best Quality)</option>
+                  <option value="gemini-3.0-pro-preview">Gemini 3.0 Pro</option>
+                  <option value="gemini-3.1-flash-preview">Gemini 3.1 Flash</option>
+                  <option value="gemini-3-flash-preview">Gemini 3 Flash (Fastest)</option>
+                </select>
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">Instructions</label>
@@ -517,7 +615,7 @@ function App() {
                 </button>
                 <button
                   type="submit"
-                  disabled={isSubmittingUpdate || (!newModelAnswerFile && !newCourseMaterialsFiles && newGenericInstructions === (activeSession.generic_instructions || ''))}
+                  disabled={isSubmittingUpdate || (!newAssignmentFile && !newModelAnswerFile && !newCourseMaterialsFiles && newGenericInstructions === (activeSession.generic_instructions || '') && newLlmModel === (activeSession.llm_model || 'gemini-3.1-pro-preview') && deletedCourseMaterials.length === 0 && !deleteModelAnswer)}
                   className="bg-indigo-600 text-white px-3 py-1.5 rounded text-xs font-medium flex items-center gap-1 hover:bg-indigo-700 disabled:opacity-50"
                 >
                   {isSubmittingUpdate ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}

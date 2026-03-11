@@ -58,6 +58,7 @@ async function initDb() {
       `;
       // Attempt to add session_id if migrating from old schema
       try { await sql`ALTER TABLE students ADD COLUMN session_id VARCHAR(255)`; } catch (e) {}
+      try { await sql`ALTER TABLE sessions ADD COLUMN llm_model VARCHAR(255)`; } catch (e) {}
       console.log("Vercel Postgres connected.");
     } else {
       console.log("Connecting to Local SQLite...");
@@ -91,6 +92,7 @@ async function initDb() {
         )
       `);
       try { db.exec(`ALTER TABLE students ADD COLUMN session_id TEXT`); } catch (e) {}
+      try { db.exec(`ALTER TABLE sessions ADD COLUMN llm_model TEXT`); } catch (e) {}
       console.log("Local SQLite connected.");
     }
     isDbInitialized = true;
@@ -169,7 +171,7 @@ app.post('/api/sessions', upload.fields([
 ]), async (req, res) => {
   try {
     await initDb();
-    const { id, name, genericInstructions } = req.body;
+    const { id, name, genericInstructions, llmModel } = req.body;
     const files = (req.files as { [fieldname: string]: Express.Multer.File[] }) || {};
     
     const assignmentFile = files['assignment']?.[0];
@@ -197,17 +199,18 @@ app.post('/api/sessions', upload.fields([
     }
 
     const cmJson = JSON.stringify(courseMaterials);
+    const modelToUse = llmModel || 'gemini-3.1-pro-preview';
 
     if (process.env.POSTGRES_URL) {
       await sql`
-        INSERT INTO sessions (id, name, assignment_url, assignment_filename, model_answer_url, model_answer_filename, course_materials, generic_instructions)
-        VALUES (${id}, ${name}, ${assignmentUrl}, ${assignmentFilename}, ${modelAnswerUrl}, ${modelAnswerFilename}, ${cmJson}, ${genericInstructions || ''})
+        INSERT INTO sessions (id, name, assignment_url, assignment_filename, model_answer_url, model_answer_filename, course_materials, generic_instructions, llm_model)
+        VALUES (${id}, ${name}, ${assignmentUrl}, ${assignmentFilename}, ${modelAnswerUrl}, ${modelAnswerFilename}, ${cmJson}, ${genericInstructions || ''}, ${modelToUse})
       `;
     } else {
       db.prepare(`
-        INSERT INTO sessions (id, name, assignment_url, assignment_filename, model_answer_url, model_answer_filename, course_materials, generic_instructions)
-        VALUES (@id, @name, @assignmentUrl, @assignmentFilename, @modelAnswerUrl, @modelAnswerFilename, @cmJson, @genericInstructions)
-      `).run({ id, name, assignmentUrl, assignmentFilename, modelAnswerUrl, modelAnswerFilename, cmJson, genericInstructions: genericInstructions || '' });
+        INSERT INTO sessions (id, name, assignment_url, assignment_filename, model_answer_url, model_answer_filename, course_materials, generic_instructions, llm_model)
+        VALUES (@id, @name, @assignmentUrl, @assignmentFilename, @modelAnswerUrl, @modelAnswerFilename, @cmJson, @genericInstructions, @llmModel)
+      `).run({ id, name, assignmentUrl, assignmentFilename, modelAnswerUrl, modelAnswerFilename, cmJson, genericInstructions: genericInstructions || '', llmModel: modelToUse });
     }
     res.json({ success: true });
   } catch (error: any) {
@@ -216,15 +219,17 @@ app.post('/api/sessions', upload.fields([
 });
 
 app.patch('/api/sessions/:sessionId', upload.fields([
+  { name: 'assignment', maxCount: 1 },
   { name: 'modelAnswer', maxCount: 1 },
   { name: 'courseMaterials' }
 ]), async (req, res) => {
   try {
     await initDb();
     const { sessionId } = req.params;
-    const { genericInstructions } = req.body;
+    const { genericInstructions, llmModel, deleteModelAnswer, deletedCourseMaterials } = req.body;
     const files = (req.files as { [fieldname: string]: Express.Multer.File[] }) || {};
     
+    const assignmentFile = files['assignment']?.[0];
     const modelAnswerFile = files['modelAnswer']?.[0];
     const courseMaterialsFiles = files['courseMaterials'] || [];
 
@@ -232,6 +237,19 @@ app.patch('/api/sessions/:sessionId', upload.fields([
     let queryParams: any = { id: sessionId };
     let pgValues: any[] = [];
     let pgSetClauses: string[] = [];
+
+    if (assignmentFile) {
+      const assignmentUrl = await uploadFile(assignmentFile);
+      const assignmentFilename = assignmentFile.originalname;
+      updateFields.push('assignment_url = @assignmentUrl', 'assignment_filename = @assignmentFilename');
+      queryParams.assignmentUrl = assignmentUrl;
+      queryParams.assignmentFilename = assignmentFilename;
+      
+      pgSetClauses.push(`assignment_url = $${pgValues.length + 1}`);
+      pgValues.push(assignmentUrl);
+      pgSetClauses.push(`assignment_filename = $${pgValues.length + 1}`);
+      pgValues.push(assignmentFilename);
+    }
 
     if (modelAnswerFile) {
       const modelAnswerUrl = await uploadFile(modelAnswerFile);
@@ -244,17 +262,47 @@ app.patch('/api/sessions/:sessionId', upload.fields([
       pgValues.push(modelAnswerUrl);
       pgSetClauses.push(`model_answer_filename = $${pgValues.length + 1}`);
       pgValues.push(modelAnswerFilename);
+    } else if (deleteModelAnswer === 'true') {
+      updateFields.push('model_answer_url = NULL', 'model_answer_filename = NULL');
+      pgSetClauses.push(`model_answer_url = NULL`);
+      pgSetClauses.push(`model_answer_filename = NULL`);
     }
 
-    if (courseMaterialsFiles.length > 0) {
-      const courseMaterials = [];
+    // Handle course materials
+    let currentMaterials: any[] = [];
+    if (courseMaterialsFiles.length > 0 || deletedCourseMaterials) {
+      // Fetch current materials first
+      let session;
+      if (process.env.POSTGRES_URL) {
+        const { rows } = await sql`SELECT course_materials FROM sessions WHERE id = ${sessionId}`;
+        session = rows[0];
+      } else {
+        session = db.prepare('SELECT course_materials FROM sessions WHERE id = ?').get(sessionId);
+      }
+      if (session && session.course_materials) {
+        currentMaterials = JSON.parse(session.course_materials);
+      }
+
+      // Remove deleted materials
+      if (deletedCourseMaterials) {
+        let deletedUrls: string[] = [];
+        try {
+          deletedUrls = JSON.parse(deletedCourseMaterials);
+        } catch (e) {
+          if (typeof deletedCourseMaterials === 'string') deletedUrls = [deletedCourseMaterials];
+        }
+        currentMaterials = currentMaterials.filter(m => !deletedUrls.includes(m.url));
+      }
+
+      // Add new materials
       for (const file of courseMaterialsFiles) {
-        courseMaterials.push({
+        currentMaterials.push({
           url: await uploadFile(file),
           filename: file.originalname
         });
       }
-      const cmJson = JSON.stringify(courseMaterials);
+
+      const cmJson = JSON.stringify(currentMaterials);
       updateFields.push('course_materials = @cmJson');
       queryParams.cmJson = cmJson;
       
@@ -268,6 +316,14 @@ app.patch('/api/sessions/:sessionId', upload.fields([
       
       pgSetClauses.push(`generic_instructions = $${pgValues.length + 1}`);
       pgValues.push(genericInstructions);
+    }
+
+    if (llmModel !== undefined) {
+      updateFields.push('llm_model = @llmModel');
+      queryParams.llmModel = llmModel;
+      
+      pgSetClauses.push(`llm_model = $${pgValues.length + 1}`);
+      pgValues.push(llmModel);
     }
 
     if (updateFields.length === 0) {
@@ -449,8 +505,9 @@ app.post('/api/students/:id/grade', async (req, res) => {
     parts.push({ text: promptText });
 
     // CHANGED MODEL TO gemini-3-flash-preview to avoid limit: 0 error on pro model
+    const modelToUse = session.llm_model || 'gemini-3-flash-preview';
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: modelToUse,
       contents: { parts },
       config: {
         responseMimeType: "application/json",
@@ -577,8 +634,9 @@ app.post('/api/sessions/:sessionId/grade-all', async (req, res) => {
     }
     parts.push({ text: promptText });
 
+    const modelToUse = session.llm_model || 'gemini-3-flash-preview';
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: modelToUse,
       contents: { parts },
       config: {
         responseMimeType: "application/json",
