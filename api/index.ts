@@ -545,7 +545,12 @@ app.post('/api/students/:id/grade', async (req, res) => {
     parts.push({ text: promptText });
 
     // CHANGED MODEL TO gemini-3.1-pro-preview as default
-    const modelToUse = session.llm_model || 'gemini-3.1-pro-preview';
+    let modelToUse = session.llm_model || 'gemini-3.1-pro-preview';
+    if (modelToUse === 'gemini-3.1-flash-preview') {
+      modelToUse = 'gemini-3.1-flash-lite-preview';
+    } else if (modelToUse === 'gemini-3.0-pro-preview') {
+      modelToUse = 'gemini-3-pro-preview';
+    }
     const response = await ai.models.generateContent({
       model: modelToUse,
       contents: { parts },
@@ -691,7 +696,12 @@ app.post('/api/sessions/:sessionId/grade-all', async (req, res) => {
     }
     parts.push({ text: promptText });
 
-    const modelToUse = session.llm_model || 'gemini-3.1-pro-preview';
+    let modelToUse = session.llm_model || 'gemini-3.1-pro-preview';
+    if (modelToUse === 'gemini-3.1-flash-preview') {
+      modelToUse = 'gemini-3.1-flash-lite-preview';
+    } else if (modelToUse === 'gemini-3.0-pro-preview') {
+      modelToUse = 'gemini-3-pro-preview';
+    }
     const response = await ai.models.generateContent({
       model: modelToUse,
       contents: { parts },

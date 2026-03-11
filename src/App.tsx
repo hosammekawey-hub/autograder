@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, FileText, CheckCircle, AlertCircle, Loader2, Plus, Trash2, ArrowLeft, BookOpen, Users, Play, RefreshCw, Edit2, X } from 'lucide-react';
+import { Upload, FileText, CheckCircle, AlertCircle, Loader2, Plus, Trash2, ArrowLeft, BookOpen, Users, Play, RefreshCw, Edit2, X, Eye, EyeOff } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 
 type Session = {
   id: string;
   name: string;
+  assignment_url: string;
   assignment_filename: string;
+  model_answer_url?: string;
   model_answer_filename?: string;
   course_materials: { url: string, filename: string }[];
   generic_instructions?: string;
@@ -18,6 +20,7 @@ type Student = {
   session_id: string;
   name: string;
   student_id: string;
+  solution_url: string;
   solution_filename: string;
   grade?: string;
   justification?: string;
@@ -48,6 +51,7 @@ function App() {
   const [solutionFile, setSolutionFile] = useState<File | null>(null);
   const [isSubmittingStudent, setIsSubmittingStudent] = useState(false);
   const [studentFeedbacks, setStudentFeedbacks] = useState<Record<string, string>>({});
+  const [expandedPreviews, setExpandedPreviews] = useState<Record<string, boolean>>({});
 
   // Update Session State
   const [isUpdatingSession, setIsUpdatingSession] = useState(false);
@@ -394,8 +398,8 @@ function App() {
                     className="w-full px-3 py-2 border border-slate-300 rounded-md"
                   >
                     <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Best Quality)</option>
-                    <option value="gemini-3.0-pro-preview">Gemini 3.0 Pro</option>
-                    <option value="gemini-3.1-flash-preview">Gemini 3.1 Flash</option>
+                    <option value="gemini-3-pro-preview">Gemini 3 Pro</option>
+                    <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash</option>
                     <option value="gemini-3-flash-preview">Gemini 3 Flash (Fastest)</option>
                   </select>
                 </div>
@@ -463,19 +467,47 @@ function App() {
         <div className="space-y-6">
           <div>
             <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Assignment</h3>
-            <div className="flex items-center gap-2 text-sm text-emerald-600 bg-emerald-50 p-2 rounded border border-emerald-100">
-              <CheckCircle className="w-4 h-4" />
-              <span className="truncate" title={activeSession.assignment_filename}>{activeSession.assignment_filename}</span>
+            <div className="flex items-center justify-between text-sm text-emerald-600 bg-emerald-50 p-2 rounded border border-emerald-100">
+              <div className="flex items-center gap-2 overflow-hidden">
+                <CheckCircle className="w-4 h-4 shrink-0" />
+                <span className="truncate" title={activeSession.assignment_filename}>{activeSession.assignment_filename}</span>
+              </div>
+              <button 
+                onClick={() => setExpandedPreviews(prev => ({ ...prev, assignment: !prev.assignment }))}
+                className="p-1 hover:bg-emerald-100 rounded text-emerald-700 transition-colors shrink-0"
+                title="Toggle Preview"
+              >
+                {expandedPreviews['assignment'] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
             </div>
+            {expandedPreviews['assignment'] && activeSession.assignment_url && (
+              <div className="mt-2 h-64 border border-slate-200 rounded overflow-hidden bg-white">
+                <iframe src={activeSession.assignment_url} className="w-full h-full" title="Assignment Preview" />
+              </div>
+            )}
           </div>
 
           {activeSession.model_answer_filename && (
             <div>
               <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Model Answer</h3>
-              <div className="flex items-center gap-2 text-sm text-emerald-600 bg-emerald-50 p-2 rounded border border-emerald-100">
-                <CheckCircle className="w-4 h-4" />
-                <span className="truncate" title={activeSession.model_answer_filename}>{activeSession.model_answer_filename}</span>
+              <div className="flex items-center justify-between text-sm text-emerald-600 bg-emerald-50 p-2 rounded border border-emerald-100">
+                <div className="flex items-center gap-2 overflow-hidden">
+                  <CheckCircle className="w-4 h-4 shrink-0" />
+                  <span className="truncate" title={activeSession.model_answer_filename}>{activeSession.model_answer_filename}</span>
+                </div>
+                <button 
+                  onClick={() => setExpandedPreviews(prev => ({ ...prev, modelAnswer: !prev.modelAnswer }))}
+                  className="p-1 hover:bg-emerald-100 rounded text-emerald-700 transition-colors shrink-0"
+                  title="Toggle Preview"
+                >
+                  {expandedPreviews['modelAnswer'] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
+              {expandedPreviews['modelAnswer'] && activeSession.model_answer_url && (
+                <div className="mt-2 h-64 border border-slate-200 rounded overflow-hidden bg-white">
+                  <iframe src={activeSession.model_answer_url} className="w-full h-full" title="Model Answer Preview" />
+                </div>
+              )}
             </div>
           )}
 
@@ -506,8 +538,8 @@ function App() {
             <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">LLM Model</h3>
             <div className="text-sm text-slate-700 bg-slate-50 p-2 rounded border border-slate-200">
               {activeSession.llm_model === 'gemini-3.1-pro-preview' ? 'Gemini 3.1 Pro' : 
-               activeSession.llm_model === 'gemini-3.0-pro-preview' ? 'Gemini 3.0 Pro' : 
-               activeSession.llm_model === 'gemini-3.1-flash-preview' ? 'Gemini 3.1 Flash' : 
+               activeSession.llm_model === 'gemini-3-pro-preview' ? 'Gemini 3 Pro' : 
+               activeSession.llm_model === 'gemini-3.1-flash-lite-preview' ? 'Gemini 3.1 Flash' : 
                activeSession.llm_model === 'gemini-3-flash-preview' ? 'Gemini 3 Flash' : 
                (activeSession.llm_model || 'Gemini 3.1 Pro')}
             </div>
@@ -591,8 +623,8 @@ function App() {
                   className="w-full border border-slate-300 rounded p-2 text-xs"
                 >
                   <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Best Quality)</option>
-                  <option value="gemini-3.0-pro-preview">Gemini 3.0 Pro</option>
-                  <option value="gemini-3.1-flash-preview">Gemini 3.1 Flash</option>
+                  <option value="gemini-3-pro-preview">Gemini 3 Pro</option>
+                  <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash</option>
                   <option value="gemini-3-flash-preview">Gemini 3 Flash (Fastest)</option>
                 </select>
               </div>
@@ -736,6 +768,13 @@ function App() {
                     <div className="flex items-center gap-2 mt-2 text-sm text-slate-600">
                       <FileText className="w-4 h-4" />
                       {student.solution_filename}
+                      <button 
+                        onClick={() => setExpandedPreviews(prev => ({ ...prev, [student.id]: !prev[student.id] }))}
+                        className="ml-2 p-1 hover:bg-slate-200 rounded text-slate-500 transition-colors"
+                        title="Toggle Preview"
+                      >
+                        {expandedPreviews[student.id] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
@@ -771,6 +810,14 @@ function App() {
                     </button>
                   </div>
                 </div>
+
+                {expandedPreviews[student.id] && student.solution_url && (
+                  <div className="border-t border-slate-200 bg-slate-50 p-4">
+                    <div className="h-96 border border-slate-200 rounded overflow-hidden bg-white">
+                      <iframe src={student.solution_url} className="w-full h-full" title="Student Submission Preview" />
+                    </div>
+                  </div>
+                )}
 
                 {student.status === 'error' && (
                   <div className="p-4 bg-red-50 border-t border-red-100 text-red-700 text-sm flex items-start gap-2">
