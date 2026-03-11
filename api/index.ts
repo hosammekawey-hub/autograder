@@ -9,7 +9,7 @@ import path from 'path';
 // Increase Vercel Serverless Function timeout to 60 seconds
 export const maxDuration = 60;
 
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
 const app = express();
 app.use(express.json());
 
