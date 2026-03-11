@@ -544,8 +544,8 @@ app.post('/api/students/:id/grade', async (req, res) => {
     }
     parts.push({ text: promptText });
 
-    // CHANGED MODEL TO gemini-3-flash-preview to avoid limit: 0 error on pro model
-    const modelToUse = session.llm_model || 'gemini-3-flash-preview';
+    // CHANGED MODEL TO gemini-3.1-pro-preview as default
+    const modelToUse = session.llm_model || 'gemini-3.1-pro-preview';
     const response = await ai.models.generateContent({
       model: modelToUse,
       contents: { parts },
@@ -599,7 +599,7 @@ app.post('/api/sessions/:sessionId/grade-all', async (req, res) => {
   try {
     await initDb();
     const { sessionId } = req.params;
-    const { feedback } = req.body;
+    const { feedback, regradeAll } = req.body;
 
     // Fetch session
     let session;
@@ -611,13 +611,22 @@ app.post('/api/sessions/:sessionId/grade-all', async (req, res) => {
     }
     if (!session) throw new Error("Session not found");
 
-    // Fetch students to grade (idle or error)
+    // Fetch students to grade
     let students;
     if (process.env.POSTGRES_URL) {
-      const { rows } = await sql`SELECT * FROM students WHERE session_id = ${sessionId} AND status IN ('idle', 'error')`;
-      students = rows;
+      if (regradeAll) {
+        const { rows } = await sql`SELECT * FROM students WHERE session_id = ${sessionId}`;
+        students = rows;
+      } else {
+        const { rows } = await sql`SELECT * FROM students WHERE session_id = ${sessionId} AND status IN ('idle', 'error')`;
+        students = rows;
+      }
     } else {
-      students = db.prepare(`SELECT * FROM students WHERE session_id = ? AND status IN ('idle', 'error')`).all(sessionId);
+      if (regradeAll) {
+        students = db.prepare(`SELECT * FROM students WHERE session_id = ?`).all(sessionId);
+      } else {
+        students = db.prepare(`SELECT * FROM students WHERE session_id = ? AND status IN ('idle', 'error')`).all(sessionId);
+      }
     }
 
     if (students.length === 0) {
@@ -626,9 +635,17 @@ app.post('/api/sessions/:sessionId/grade-all', async (req, res) => {
 
     // Update status to grading
     if (process.env.POSTGRES_URL) {
-      await sql`UPDATE students SET status = 'grading' WHERE session_id = ${sessionId} AND status IN ('idle', 'error')`;
+      if (regradeAll) {
+        await sql`UPDATE students SET status = 'grading' WHERE session_id = ${sessionId}`;
+      } else {
+        await sql`UPDATE students SET status = 'grading' WHERE session_id = ${sessionId} AND status IN ('idle', 'error')`;
+      }
     } else {
-      db.prepare(`UPDATE students SET status = 'grading' WHERE session_id = ? AND status IN ('idle', 'error')`).run(sessionId);
+      if (regradeAll) {
+        db.prepare(`UPDATE students SET status = 'grading' WHERE session_id = ?`).run(sessionId);
+      } else {
+        db.prepare(`UPDATE students SET status = 'grading' WHERE session_id = ? AND status IN ('idle', 'error')`).run(sessionId);
+      }
     }
 
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -674,7 +691,7 @@ app.post('/api/sessions/:sessionId/grade-all', async (req, res) => {
     }
     parts.push({ text: promptText });
 
-    const modelToUse = session.llm_model || 'gemini-3-flash-preview';
+    const modelToUse = session.llm_model || 'gemini-3.1-pro-preview';
     const response = await ai.models.generateContent({
       model: modelToUse,
       contents: { parts },
