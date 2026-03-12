@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, FileText, CheckCircle, AlertCircle, Loader2, Plus, Trash2, ArrowLeft, BookOpen, Users, Play, RefreshCw, Edit2, X, Eye, EyeOff, Download } from 'lucide-react';
+import { Upload, FileText, CheckCircle, AlertCircle, Loader2, Plus, Trash2, ArrowLeft, BookOpen, Users, Play, RefreshCw, Edit2, X, Eye, EyeOff, Download, ChevronDown, ChevronUp } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -46,6 +46,7 @@ function StudentGradingDetails({ student, onUpdate }: { student: Student, onUpda
   const [details, setDetails] = useState<GradingDetail[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [editedGrade, setEditedGrade] = useState(student.grade || '');
+  const [isExpanded, setIsExpanded] = useState(false);
 
   useEffect(() => {
     if (student.grading_details) {
@@ -119,7 +120,10 @@ function StudentGradingDetails({ student, onUpdate }: { student: Student, onUpda
   return (
     <div className="mt-6 border-t border-slate-200 pt-6">
       <div className="flex justify-between items-center mb-4">
-        <h4 className="text-lg font-semibold text-slate-900">Detailed Grading Report</h4>
+        <div className="flex items-center gap-2 cursor-pointer" onClick={() => setIsExpanded(!isExpanded)}>
+          {isExpanded ? <ChevronUp className="w-5 h-5 text-slate-500" /> : <ChevronDown className="w-5 h-5 text-slate-500" />}
+          <h4 className="text-lg font-semibold text-slate-900">Detailed Grading Report</h4>
+        </div>
         {!isEditing ? (
           <div className="flex items-center gap-2">
             <button onClick={handleExportPDF} className="text-sm bg-slate-100 text-slate-700 px-3 py-1.5 rounded font-medium flex items-center gap-1 hover:bg-slate-200 transition-colors">
@@ -129,6 +133,7 @@ function StudentGradingDetails({ student, onUpdate }: { student: Student, onUpda
               <Download className="w-4 h-4" /> Excel
             </button>
             <button onClick={() => { 
+              setIsExpanded(true);
               setIsEditing(true); 
               const total = details.reduce((sum, detail) => sum + (parseFloat(detail.suggested_grade) || 0), 0);
               setEditedGrade(total > 0 ? total.toString() : (student.grade || '')); 
@@ -144,72 +149,76 @@ function StudentGradingDetails({ student, onUpdate }: { student: Student, onUpda
         )}
       </div>
 
-      {isEditing && (
-        <div className="mb-4 flex items-center gap-4 bg-indigo-50 p-4 rounded-lg border border-indigo-100">
-          <label className="text-sm font-medium text-indigo-900">Overall Grade Override:</label>
-          <input 
-            type="text" 
-            value={editedGrade} 
-            onChange={(e) => setEditedGrade(e.target.value)}
-            className="border border-indigo-200 rounded px-3 py-1.5 text-sm font-bold text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          />
-        </div>
-      )}
+      {isExpanded && (
+        <>
+          {isEditing && (
+            <div className="mb-4 flex items-center gap-4 bg-indigo-50 p-4 rounded-lg border border-indigo-100">
+              <label className="text-sm font-medium text-indigo-900">Overall Grade Override:</label>
+              <input 
+                type="text" 
+                value={editedGrade} 
+                onChange={(e) => setEditedGrade(e.target.value)}
+                className="border border-indigo-200 rounded px-3 py-1.5 text-sm font-bold text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+          )}
 
-      <div className="overflow-x-auto rounded-lg border border-slate-200">
-        <table className="w-full text-sm text-left text-slate-600 border-collapse">
-          <thead className="text-xs text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
-            <tr>
-              <th className="px-4 py-3 font-medium border-r border-slate-200">Q#</th>
-              <th className="px-4 py-3 font-medium border-r border-slate-200">Question Text</th>
-              <th className="px-4 py-3 font-medium border-r border-slate-200">Model Answer</th>
-              <th className="px-4 py-3 font-medium border-r border-slate-200">Student Answer</th>
-              <th className="px-4 py-3 font-medium border-r border-slate-200">Identified Issue</th>
-              <th className="px-4 py-3 font-medium border-r border-slate-200">Grade</th>
-              <th className="px-4 py-3 font-medium">Max Grade</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-200">
-            {details.map((detail, idx) => (
-              <tr key={idx} className="hover:bg-slate-50/50 align-top">
-                <td className="px-4 py-3 font-medium text-slate-900 whitespace-nowrap border-r border-slate-200">{detail.question_number}</td>
-                <td className="px-4 py-3 min-w-[200px] border-r border-slate-200">{detail.question_text}</td>
-                <td className="px-4 py-3 min-w-[200px] border-r border-slate-200">{detail.model_answer}</td>
-                <td className="px-4 py-3 min-w-[200px] border-r border-slate-200">{detail.student_answer}</td>
-                <td className="px-4 py-3 min-w-[200px] border-r border-slate-200">
-                  {isEditing ? (
-                    <textarea 
-                      value={detail.identified_issue} 
-                      onChange={(e) => handleDetailChange(idx, 'identified_issue', e.target.value)}
-                      className="w-full border border-slate-300 rounded p-1.5 text-sm"
-                      rows={3}
-                    />
-                  ) : (
-                    <span className={detail.identified_issue.toLowerCase() === 'none' ? 'text-emerald-600 font-medium' : 'text-amber-700'}>
-                      {detail.identified_issue}
-                    </span>
-                  )}
-                </td>
-                <td className="px-4 py-3 whitespace-nowrap border-r border-slate-200">
-                  {isEditing ? (
-                    <input 
-                      type="text" 
-                      value={detail.suggested_grade} 
-                      onChange={(e) => handleDetailChange(idx, 'suggested_grade', e.target.value)}
-                      className="w-20 border border-slate-300 rounded p-1.5 text-sm font-medium"
-                    />
-                  ) : (
-                    <span className="font-medium text-slate-900">{detail.suggested_grade}</span>
-                  )}
-                </td>
-                <td className="px-4 py-3 whitespace-nowrap">
-                  <span className="font-medium text-slate-500">{detail.max_grade || '-'}</span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          <div className="overflow-x-auto rounded-lg border border-slate-200">
+            <table className="w-full text-sm text-left text-slate-600 border-collapse">
+              <thead className="text-xs text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="px-4 py-3 font-medium border-r border-slate-200">Q#</th>
+                  <th className="px-4 py-3 font-medium border-r border-slate-200">Question Text</th>
+                  <th className="px-4 py-3 font-medium border-r border-slate-200">Model Answer</th>
+                  <th className="px-4 py-3 font-medium border-r border-slate-200">Student Answer</th>
+                  <th className="px-4 py-3 font-medium border-r border-slate-200">Identified Issue</th>
+                  <th className="px-4 py-3 font-medium border-r border-slate-200">Grade</th>
+                  <th className="px-4 py-3 font-medium">Max Grade</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {details.map((detail, idx) => (
+                  <tr key={idx} className="hover:bg-slate-50/50 align-top">
+                    <td className="px-4 py-3 font-medium text-slate-900 whitespace-nowrap border-r border-slate-200">{detail.question_number}</td>
+                    <td className="px-4 py-3 min-w-[200px] border-r border-slate-200">{detail.question_text}</td>
+                    <td className="px-4 py-3 min-w-[200px] border-r border-slate-200">{detail.model_answer}</td>
+                    <td className="px-4 py-3 min-w-[200px] border-r border-slate-200">{detail.student_answer}</td>
+                    <td className="px-4 py-3 min-w-[200px] border-r border-slate-200">
+                      {isEditing ? (
+                        <textarea 
+                          value={detail.identified_issue} 
+                          onChange={(e) => handleDetailChange(idx, 'identified_issue', e.target.value)}
+                          className="w-full border border-slate-300 rounded p-1.5 text-sm"
+                          rows={3}
+                        />
+                      ) : (
+                        <span className={detail.identified_issue.toLowerCase() === 'none' ? 'text-emerald-600 font-medium' : 'text-amber-700'}>
+                          {detail.identified_issue}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap border-r border-slate-200">
+                      {isEditing ? (
+                        <input 
+                          type="text" 
+                          value={detail.suggested_grade} 
+                          onChange={(e) => handleDetailChange(idx, 'suggested_grade', e.target.value)}
+                          className="w-20 border border-slate-300 rounded p-1.5 text-sm font-medium"
+                        />
+                      ) : (
+                        <span className="font-medium text-slate-900">{detail.suggested_grade}</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span className="font-medium text-slate-500">{detail.max_grade || '-'}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </div>
   );
 }
