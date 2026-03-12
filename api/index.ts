@@ -570,13 +570,14 @@ app.post('/api/students/:id/grade', async (req, res) => {
                 type: Type.OBJECT,
                 properties: {
                   question_number: { type: Type.STRING, description: "The atomic question number (e.g., '1.a', '1.b', '2.i'). NEVER group sub-questions. Each sub-question must have its own entry." },
-                  question_text: { type: Type.STRING, description: "The specific text for this atomic sub-question." },
+                  question_text: { type: Type.STRING, description: "The exact atomic question text, not just a brief description." },
                   model_answer: { type: Type.STRING },
                   student_answer: { type: Type.STRING },
                   identified_issue: { type: Type.STRING, description: "Identified issue, or 'None' if correct" },
-                  suggested_grade: { type: Type.STRING, description: "The numeric points awarded for this sub-question (e.g., '5', '2.5')." }
+                  suggested_grade: { type: Type.STRING, description: "The numeric points awarded for this sub-question (e.g., '5', '2.5')." },
+                  max_grade: { type: Type.STRING, description: "The maximum possible numeric points for this sub-question." }
                 },
-                required: ["question_number", "question_text", "model_answer", "student_answer", "identified_issue", "suggested_grade"]
+                required: ["question_number", "question_text", "model_answer", "student_answer", "identified_issue", "suggested_grade", "max_grade"]
               }
             }
           },
@@ -739,13 +740,14 @@ app.post('/api/sessions/:sessionId/grade-all', async (req, res) => {
                   type: Type.OBJECT,
                   properties: {
                     question_number: { type: Type.STRING, description: "The atomic question number (e.g., '1.a', '1.b', '2.i'). NEVER group sub-questions. Each sub-question must have its own entry." },
-                    question_text: { type: Type.STRING, description: "The specific text for this atomic sub-question." },
+                    question_text: { type: Type.STRING, description: "The exact atomic question text, not just a brief description." },
                     model_answer: { type: Type.STRING },
                     student_answer: { type: Type.STRING },
                     identified_issue: { type: Type.STRING, description: "Identified issue, or 'None' if correct" },
-                    suggested_grade: { type: Type.STRING, description: "The numeric points awarded for this sub-question (e.g., '5', '2.5')." }
+                    suggested_grade: { type: Type.STRING, description: "The numeric points awarded for this sub-question (e.g., '5', '2.5')." },
+                    max_grade: { type: Type.STRING, description: "The maximum possible numeric points for this sub-question." }
                   },
-                  required: ["question_number", "question_text", "model_answer", "student_answer", "identified_issue", "suggested_grade"]
+                  required: ["question_number", "question_text", "model_answer", "student_answer", "identified_issue", "suggested_grade", "max_grade"]
                 }
               }
             },

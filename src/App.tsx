@@ -39,6 +39,7 @@ type GradingDetail = {
   student_answer: string;
   identified_issue: string;
   suggested_grade: string;
+  max_grade?: string;
 };
 
 function StudentGradingDetails({ student, onUpdate }: { student: Student, onUpdate: (studentId: string, updates: Partial<Student>) => void }) {
@@ -162,7 +163,8 @@ function StudentGradingDetails({ student, onUpdate }: { student: Student, onUpda
               <th className="px-4 py-3 font-medium border-r border-slate-200">Model Answer</th>
               <th className="px-4 py-3 font-medium border-r border-slate-200">Student Answer</th>
               <th className="px-4 py-3 font-medium border-r border-slate-200">Identified Issue</th>
-              <th className="px-4 py-3 font-medium">Grade</th>
+              <th className="px-4 py-3 font-medium border-r border-slate-200">Grade</th>
+              <th className="px-4 py-3 font-medium">Max Grade</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200">
@@ -186,7 +188,7 @@ function StudentGradingDetails({ student, onUpdate }: { student: Student, onUpda
                     </span>
                   )}
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap">
+                <td className="px-4 py-3 whitespace-nowrap border-r border-slate-200">
                   {isEditing ? (
                     <input 
                       type="text" 
@@ -197,6 +199,9 @@ function StudentGradingDetails({ student, onUpdate }: { student: Student, onUpda
                   ) : (
                     <span className="font-medium text-slate-900">{detail.suggested_grade}</span>
                   )}
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <span className="font-medium text-slate-500">{detail.max_grade || '-'}</span>
                 </td>
               </tr>
             ))}
