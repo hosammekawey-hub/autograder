@@ -87,12 +87,13 @@ function StudentGradingDetails({ student, onUpdate }: { student: Student, onUpda
     const tableData = details.map(d => [
       d.question_number,
       d.identified_issue,
+      d.model_answer,
       d.suggested_grade
     ]);
 
     autoTable(doc, {
       startY: 30,
-      head: [['Q#', 'Identified Issue', 'Grade']],
+      head: [['Q#', 'Identified Issue', 'Model Answer', 'Grade']],
       body: tableData,
     });
 
@@ -103,6 +104,7 @@ function StudentGradingDetails({ student, onUpdate }: { student: Student, onUpda
     const tableData = details.map(d => ({
       'Q#': d.question_number,
       'Identified Issue': d.identified_issue,
+      'Model Answer': d.model_answer,
       'Grade': d.suggested_grade
     }));
 
