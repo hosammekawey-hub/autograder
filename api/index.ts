@@ -2,6 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import { GoogleGenAI, Type } from '@google/genai';
 import { put, del } from '@vercel/blob';
+import { handleUpload } from '@vercel/blob/client';
 import { sql } from '@vercel/postgres';
 import fs from 'fs';
 import path from 'path';
@@ -162,6 +163,28 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 // --- API Routes ---
 
+app.post('/api/upload', async (req, res) => {
+  const body = req.body;
+  try {
+    const jsonResponse = await handleUpload({
+      body,
+      request: req,
+      onBeforeGenerateToken: async (pathname, clientPayload) => {
+        return {
+          tokenPayload: JSON.stringify({}),
+        };
+      },
+    });
+    return res.status(200).json(jsonResponse);
+  } catch (error: any) {
+    return res.status(400).json({ error: error.message });
+  }
+});
+
+app.get('/api/upload-token', (req, res) => {
+  res.json({ token: process.env.BLOB_READ_WRITE_TOKEN || null });
+});
+
 // 1. Sessions
 app.get('/api/sessions', async (req, res) => {
   try {
@@ -191,26 +214,33 @@ app.post('/api/sessions', upload.fields([
 ]), async (req, res) => {
   try {
     await initDb();
-    const { id, name, genericInstructions, llmModel } = req.body;
+    const { id, name, genericInstructions, llmModel, assignment_url, assignment_filename, model_answer_url, model_answer_filename, course_materials_json } = req.body;
     const files = (req.files as { [fieldname: string]: Express.Multer.File[] }) || {};
     
     const assignmentFile = files['assignment']?.[0];
     const modelAnswerFile = files['modelAnswer']?.[0];
     const courseMaterialsFiles = files['courseMaterials'] || [];
 
-    if (!assignmentFile) throw new Error("Assignment file is required");
+    let assignmentUrl = assignment_url;
+    let assignmentFilename = assignment_filename;
+    if (assignmentFile) {
+      assignmentUrl = await uploadFile(assignmentFile);
+      assignmentFilename = assignmentFile.originalname;
+    }
 
-    const assignmentUrl = await uploadFile(assignmentFile);
-    const assignmentFilename = assignmentFile.originalname;
+    if (!assignmentUrl || !assignmentFilename) throw new Error("Assignment file or URL is required");
 
-    let modelAnswerUrl = null;
-    let modelAnswerFilename = null;
+    let modelAnswerUrl = model_answer_url || null;
+    let modelAnswerFilename = model_answer_filename || null;
     if (modelAnswerFile) {
       modelAnswerUrl = await uploadFile(modelAnswerFile);
       modelAnswerFilename = modelAnswerFile.originalname;
     }
 
-    const courseMaterials = [];
+    let courseMaterials = [];
+    if (course_materials_json) {
+      courseMaterials = JSON.parse(course_materials_json);
+    }
     for (const file of courseMaterialsFiles) {
       courseMaterials.push({
         url: await uploadFile(file),
@@ -246,7 +276,7 @@ app.patch('/api/sessions/:sessionId', upload.fields([
   try {
     await initDb();
     const { sessionId } = req.params;
-    const { genericInstructions, llmModel, deleteModelAnswer, deletedCourseMaterials } = req.body;
+    const { genericInstructions, llmModel, deleteModelAnswer, deletedCourseMaterials, assignment_url, assignment_filename, model_answer_url, model_answer_filename, course_materials_json } = req.body;
     const files = (req.files as { [fieldname: string]: Express.Multer.File[] }) || {};
     
     // Fetch current session to get old URLs
@@ -268,10 +298,10 @@ app.patch('/api/sessions/:sessionId', upload.fields([
     let pgValues: any[] = [];
     let pgSetClauses: string[] = [];
 
-    if (assignmentFile) {
-      if (session.assignment_url) await deleteFile(session.assignment_url);
-      const assignmentUrl = await uploadFile(assignmentFile);
-      const assignmentFilename = assignmentFile.originalname;
+    if (assignmentFile || assignment_url) {
+      if (session.assignment_url && session.assignment_url !== assignment_url) await deleteFile(session.assignment_url);
+      const assignmentUrl = assignmentFile ? await uploadFile(assignmentFile) : assignment_url;
+      const assignmentFilename = assignmentFile ? assignmentFile.originalname : assignment_filename;
       updateFields.push('assignment_url = @assignmentUrl', 'assignment_filename = @assignmentFilename');
       queryParams.assignmentUrl = assignmentUrl;
       queryParams.assignmentFilename = assignmentFilename;
@@ -282,10 +312,10 @@ app.patch('/api/sessions/:sessionId', upload.fields([
       pgValues.push(assignmentFilename);
     }
 
-    if (modelAnswerFile) {
-      if (session.model_answer_url) await deleteFile(session.model_answer_url);
-      const modelAnswerUrl = await uploadFile(modelAnswerFile);
-      const modelAnswerFilename = modelAnswerFile.originalname;
+    if (modelAnswerFile || model_answer_url) {
+      if (session.model_answer_url && session.model_answer_url !== model_answer_url) await deleteFile(session.model_answer_url);
+      const modelAnswerUrl = modelAnswerFile ? await uploadFile(modelAnswerFile) : model_answer_url;
+      const modelAnswerFilename = modelAnswerFile ? modelAnswerFile.originalname : model_answer_filename;
       updateFields.push('model_answer_url = @modelAnswerUrl', 'model_answer_filename = @modelAnswerFilename');
       queryParams.modelAnswerUrl = modelAnswerUrl;
       queryParams.modelAnswerFilename = modelAnswerFilename;
@@ -303,7 +333,7 @@ app.patch('/api/sessions/:sessionId', upload.fields([
 
     // Handle course materials
     let currentMaterials: any[] = [];
-    if (courseMaterialsFiles.length > 0 || deletedCourseMaterials) {
+    if (courseMaterialsFiles.length > 0 || deletedCourseMaterials || course_materials_json) {
       if (session && session.course_materials) {
         currentMaterials = JSON.parse(session.course_materials);
       }
@@ -320,10 +350,14 @@ app.patch('/api/sessions/:sessionId', upload.fields([
         for (const url of deletedUrls) {
           await deleteFile(url);
         }
-        currentMaterials = currentMaterials.filter(m => !deletedUrls.includes(m.url));
+        currentMaterials = currentMaterials.filter((m: any) => !deletedUrls.includes(m.url));
       }
 
       // Add new materials
+      if (course_materials_json) {
+        const newMaterials = JSON.parse(course_materials_json);
+        currentMaterials = [...currentMaterials, ...newMaterials];
+      }
       for (const file of courseMaterialsFiles) {
         currentMaterials.push({
           url: await uploadFile(file),
@@ -395,13 +429,20 @@ app.post('/api/sessions/:sessionId/students', upload.single('solution'), async (
   try {
     await initDb();
     const { sessionId } = req.params;
-    const { id, name, student_id } = req.body;
+    const { id, name, student_id, solution_url, solution_filename } = req.body;
     const solutionFile = req.file;
 
-    if (!solutionFile) throw new Error("Solution file is required");
+    let solutionUrl = solution_url;
+    let solutionFilename = solution_filename;
 
-    const solutionUrl = await uploadFile(solutionFile);
-    const solutionFilename = solutionFile.originalname;
+    if (solutionFile) {
+      solutionUrl = await uploadFile(solutionFile);
+      solutionFilename = solutionFile.originalname;
+    }
+
+    if (!solutionUrl || !solutionFilename) {
+      throw new Error("Solution file or URL is required");
+    }
 
     if (process.env.POSTGRES_URL) {
       await sql`

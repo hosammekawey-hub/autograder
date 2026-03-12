@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
+import { upload } from '@vercel/blob/client';
 
 type Session = {
   id: string;
@@ -300,21 +301,50 @@ function App() {
     if (!assignmentFile || !sessionName) return;
 
     setIsSubmittingSession(true);
-    const formData = new FormData();
-    const sessionId = uuidv4();
-    formData.append('id', sessionId);
-    formData.append('name', sessionName);
-    formData.append('assignment', assignmentFile);
-    if (modelAnswerFile) formData.append('modelAnswer', modelAnswerFile);
-    if (courseMaterialsFiles) {
-      Array.from(courseMaterialsFiles).forEach(file => {
-        formData.append('courseMaterials', file);
-      });
-    }
-    formData.append('genericInstructions', genericInstructions);
-    formData.append('llmModel', llmModel);
-
+    
     try {
+      // 1. Fetch blob token
+      const tokenRes = await fetch('/api/upload-token');
+      const { token } = await tokenRes.json();
+
+      const formData = new FormData();
+      const sessionId = uuidv4();
+      formData.append('id', sessionId);
+      formData.append('name', sessionName);
+      formData.append('genericInstructions', genericInstructions);
+      formData.append('llmModel', llmModel);
+
+      if (token) {
+        // Upload directly to Vercel Blob
+        const assignmentBlob = await upload(assignmentFile.name, assignmentFile, { access: 'public', handleUploadUrl: '/api/upload' });
+        formData.append('assignment_url', assignmentBlob.url);
+        formData.append('assignment_filename', assignmentFile.name);
+
+        if (modelAnswerFile) {
+          const modelAnswerBlob = await upload(modelAnswerFile.name, modelAnswerFile, { access: 'public', handleUploadUrl: '/api/upload' });
+          formData.append('model_answer_url', modelAnswerBlob.url);
+          formData.append('model_answer_filename', modelAnswerFile.name);
+        }
+
+        if (courseMaterialsFiles && courseMaterialsFiles.length > 0) {
+          const courseMaterials = [];
+          for (const file of Array.from(courseMaterialsFiles as Iterable<File>)) {
+            const cmBlob = await upload(file.name, file, { access: 'public', handleUploadUrl: '/api/upload' });
+            courseMaterials.push({ url: cmBlob.url, filename: file.name });
+          }
+          formData.append('course_materials_json', JSON.stringify(courseMaterials));
+        }
+      } else {
+        // Fallback to standard upload
+        formData.append('assignment', assignmentFile);
+        if (modelAnswerFile) formData.append('modelAnswer', modelAnswerFile);
+        if (courseMaterialsFiles) {
+          Array.from(courseMaterialsFiles as Iterable<File>).forEach(file => {
+            formData.append('courseMaterials', file);
+          });
+        }
+      }
+
       const res = await fetch('/api/sessions', {
         method: 'POST',
         body: formData,
@@ -334,6 +364,7 @@ function App() {
         alert(`Failed to create session: ${data.details || data.error}`);
       }
     } catch (error) {
+      console.error(error);
       alert('Network error while creating session.');
     } finally {
       setIsSubmittingSession(false);
@@ -345,13 +376,38 @@ function App() {
     if (!activeSession || !solutionFile) return;
 
     setIsSubmittingStudent(true);
-    const formData = new FormData();
-    formData.append('id', uuidv4());
-    formData.append('name', studentName);
-    formData.append('student_id', studentId);
-    formData.append('solution', solutionFile);
-
+    
     try {
+      // 1. Fetch blob token
+      const tokenRes = await fetch('/api/upload-token');
+      const { token } = await tokenRes.json();
+
+      let solution_url = '';
+      let solution_filename = '';
+      let formData = new FormData();
+
+      if (token) {
+        // Upload directly to Vercel Blob from browser
+        const blob = await upload(solutionFile.name, solutionFile, {
+          access: 'public',
+          handleUploadUrl: '/api/upload'
+        });
+        solution_url = blob.url;
+        solution_filename = solutionFile.name;
+        
+        formData.append('id', uuidv4());
+        formData.append('name', studentName);
+        formData.append('student_id', studentId);
+        formData.append('solution_url', solution_url);
+        formData.append('solution_filename', solution_filename);
+      } else {
+        // Fallback to standard upload
+        formData.append('id', uuidv4());
+        formData.append('name', studentName);
+        formData.append('student_id', studentId);
+        formData.append('solution', solutionFile);
+      }
+
       const res = await fetch(`/api/sessions/${activeSession.id}/students`, {
         method: 'POST',
         body: formData,
@@ -367,6 +423,7 @@ function App() {
         alert(`Failed to add student: ${data.details || data.error}`);
       }
     } catch (error) {
+      console.error(error);
       alert('Network error while adding student.');
     } finally {
       setIsSubmittingStudent(false);
@@ -383,28 +440,56 @@ function App() {
     if (!newAssignmentFile && !newModelAnswerFile && !newCourseMaterialsFiles && !hasInstructionsChanged && !hasModelChanged && deletedCourseMaterials.length === 0 && !deleteModelAnswer) return;
 
     setIsSubmittingUpdate(true);
-    const formData = new FormData();
-    if (newAssignmentFile) formData.append('assignment', newAssignmentFile);
-    if (newModelAnswerFile) formData.append('modelAnswer', newModelAnswerFile);
-    if (newCourseMaterialsFiles) {
-      Array.from(newCourseMaterialsFiles).forEach(file => {
-        formData.append('courseMaterials', file);
-      });
-    }
-    if (hasInstructionsChanged) {
-      formData.append('genericInstructions', newGenericInstructions);
-    }
-    if (hasModelChanged) {
-      formData.append('llmModel', newLlmModel);
-    }
-    if (deletedCourseMaterials.length > 0) {
-      formData.append('deletedCourseMaterials', JSON.stringify(deletedCourseMaterials));
-    }
-    if (deleteModelAnswer) {
-      formData.append('deleteModelAnswer', 'true');
-    }
-
+    
     try {
+      // 1. Fetch blob token
+      const tokenRes = await fetch('/api/upload-token');
+      const { token } = await tokenRes.json();
+
+      const formData = new FormData();
+      
+      if (token) {
+        if (newAssignmentFile) {
+          const assignmentBlob = await upload(newAssignmentFile.name, newAssignmentFile, { access: 'public', handleUploadUrl: '/api/upload' });
+          formData.append('assignment_url', assignmentBlob.url);
+          formData.append('assignment_filename', newAssignmentFile.name);
+        }
+        if (newModelAnswerFile) {
+          const modelAnswerBlob = await upload(newModelAnswerFile.name, newModelAnswerFile, { access: 'public', handleUploadUrl: '/api/upload' });
+          formData.append('model_answer_url', modelAnswerBlob.url);
+          formData.append('model_answer_filename', newModelAnswerFile.name);
+        }
+        if (newCourseMaterialsFiles && newCourseMaterialsFiles.length > 0) {
+          const courseMaterials = [];
+          for (const file of Array.from(newCourseMaterialsFiles as Iterable<File>)) {
+            const cmBlob = await upload(file.name, file, { access: 'public', handleUploadUrl: '/api/upload' });
+            courseMaterials.push({ url: cmBlob.url, filename: file.name });
+          }
+          formData.append('course_materials_json', JSON.stringify(courseMaterials));
+        }
+      } else {
+        if (newAssignmentFile) formData.append('assignment', newAssignmentFile);
+        if (newModelAnswerFile) formData.append('modelAnswer', newModelAnswerFile);
+        if (newCourseMaterialsFiles) {
+          Array.from(newCourseMaterialsFiles as Iterable<File>).forEach(file => {
+            formData.append('courseMaterials', file);
+          });
+        }
+      }
+
+      if (hasInstructionsChanged) {
+        formData.append('genericInstructions', newGenericInstructions);
+      }
+      if (hasModelChanged) {
+        formData.append('llmModel', newLlmModel);
+      }
+      if (deletedCourseMaterials.length > 0) {
+        formData.append('deletedCourseMaterials', JSON.stringify(deletedCourseMaterials));
+      }
+      if (deleteModelAnswer) {
+        formData.append('deleteModelAnswer', 'true');
+      }
+
       const res = await fetch(`/api/sessions/${activeSession.id}`, {
         method: 'PATCH',
         body: formData,
@@ -428,6 +513,7 @@ function App() {
         alert(`Failed to update session: ${data.details || data.error}`);
       }
     } catch (error) {
+      console.error(error);
       alert('Network error while updating session.');
     } finally {
       setIsSubmittingUpdate(false);
