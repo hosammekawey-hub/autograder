@@ -419,7 +419,7 @@ app.post('/api/sessions/:sessionId/students', upload.single('solution'), async (
   }
 });
 
-app.put('/api/students/:id', async (req, res) => {
+app.patch('/api/students/:id', async (req, res) => {
   try {
     await initDb();
     const { id } = req.params;

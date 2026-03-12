@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, FileText, CheckCircle, AlertCircle, Loader2, Plus, Trash2, ArrowLeft, BookOpen, Users, Play, RefreshCw, Edit2, X, Eye, EyeOff } from 'lucide-react';
+import { Upload, FileText, CheckCircle, AlertCircle, Loader2, Plus, Trash2, ArrowLeft, BookOpen, Users, Play, RefreshCw, Edit2, X, Eye, EyeOff, Download } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import * as XLSX from 'xlsx';
 
 type Session = {
   id: string;
@@ -57,6 +60,14 @@ function StudentGradingDetails({ student, onUpdate }: { student: Student, onUpda
     const newDetails = [...details];
     newDetails[index] = { ...newDetails[index], [field]: value };
     setDetails(newDetails);
+    
+    if (field === 'suggested_grade') {
+      const total = newDetails.reduce((sum, detail) => {
+        const grade = parseFloat(detail.suggested_grade) || 0;
+        return sum + grade;
+      }, 0);
+      setEditedGrade(total.toString());
+    }
   };
 
   const handleSave = () => {
@@ -67,6 +78,39 @@ function StudentGradingDetails({ student, onUpdate }: { student: Student, onUpda
     setIsEditing(false);
   };
 
+  const handleExportPDF = () => {
+    const doc = new jsPDF();
+    doc.text(`Grading Report: ${student.name} (${student.student_id})`, 14, 15);
+    doc.text(`Total Grade: ${student.grade || 'N/A'}`, 14, 25);
+    
+    const tableData = details.map(d => [
+      d.question_number,
+      d.identified_issue,
+      d.suggested_grade
+    ]);
+
+    autoTable(doc, {
+      startY: 30,
+      head: [['Q#', 'Identified Issue', 'Grade']],
+      body: tableData,
+    });
+
+    doc.save(`${student.name}_Grading_Report.pdf`);
+  };
+
+  const handleExportExcel = () => {
+    const tableData = details.map(d => ({
+      'Q#': d.question_number,
+      'Identified Issue': d.identified_issue,
+      'Grade': d.suggested_grade
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(tableData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Grading Report");
+    XLSX.writeFile(wb, `${student.name}_Grading_Report.xlsx`);
+  };
+
   if (!student.grading_details || details.length === 0) return null;
 
   return (
@@ -74,9 +118,21 @@ function StudentGradingDetails({ student, onUpdate }: { student: Student, onUpda
       <div className="flex justify-between items-center mb-4">
         <h4 className="text-lg font-semibold text-slate-900">Detailed Grading Report</h4>
         {!isEditing ? (
-          <button onClick={() => { setIsEditing(true); setEditedGrade(student.grade || ''); }} className="text-sm bg-slate-100 text-slate-700 px-3 py-1.5 rounded font-medium flex items-center gap-1 hover:bg-slate-200 transition-colors">
-            <Edit2 className="w-4 h-4" /> Edit Report
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={handleExportPDF} className="text-sm bg-slate-100 text-slate-700 px-3 py-1.5 rounded font-medium flex items-center gap-1 hover:bg-slate-200 transition-colors">
+              <Download className="w-4 h-4" /> PDF
+            </button>
+            <button onClick={handleExportExcel} className="text-sm bg-slate-100 text-slate-700 px-3 py-1.5 rounded font-medium flex items-center gap-1 hover:bg-slate-200 transition-colors">
+              <Download className="w-4 h-4" /> Excel
+            </button>
+            <button onClick={() => { 
+              setIsEditing(true); 
+              const total = details.reduce((sum, detail) => sum + (parseFloat(detail.suggested_grade) || 0), 0);
+              setEditedGrade(total > 0 ? total.toString() : (student.grade || '')); 
+            }} className="text-sm bg-slate-100 text-slate-700 px-3 py-1.5 rounded font-medium flex items-center gap-1 hover:bg-slate-200 transition-colors">
+              <Edit2 className="w-4 h-4" /> Edit Report
+            </button>
+          </div>
         ) : (
           <div className="flex items-center gap-2">
             <button onClick={() => setIsEditing(false)} className="text-sm text-slate-500 hover:text-slate-700 font-medium px-3 py-1.5">Cancel</button>
