@@ -1298,7 +1298,7 @@ function App() {
                         </div>
                       </div>
                     </div>
-                    <StudentGradingDetails student={student} onUpdate={handleUpdateStudentGrade} />
+                    <StudentGradingDetails student={student} onUpdate={handleUpdateStudentGrade} llmModel={activeSession.llm_model} />
                   </div>
                 )}
               </div>
