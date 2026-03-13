@@ -348,6 +348,21 @@ function App() {
   const [students, setStudents] = useState<Student[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  const calculatePercentage = (student: Student) => {
+    if (!student.grading_details) return null;
+    try {
+      const details: GradingDetail[] = JSON.parse(student.grading_details);
+      const totalGrade = details.reduce((sum, d) => sum + (parseFloat(d.suggested_grade) || 0), 0);
+      const totalMaxGrade = details.reduce((sum, d) => sum + (parseFloat(d.max_grade || '0') || 0), 0);
+      if (totalMaxGrade > 0) {
+        return ((totalGrade / totalMaxGrade) * 100).toFixed(1) + '%';
+      }
+    } catch (e) {
+      return null;
+    }
+    return null;
+  };
+
   // Create Session State
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [sessionName, setSessionName] = useState('');
@@ -1259,6 +1274,9 @@ function App() {
                         <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 text-center h-full flex flex-col justify-center">
                           <p className="text-sm font-medium text-slate-500 uppercase tracking-wider mb-1">Recommended Grade</p>
                           <p className="text-3xl font-bold text-indigo-600">{student.grade}</p>
+                          {calculatePercentage(student) && (
+                            <p className="text-sm font-medium text-slate-500 mt-1">{calculatePercentage(student)}</p>
+                          )}
                         </div>
                       </div>
                       <div className="md:col-span-3">
