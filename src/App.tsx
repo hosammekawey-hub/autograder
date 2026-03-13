@@ -182,8 +182,30 @@ function StudentGradingDetails({ student, onUpdate }: { student: Student, onUpda
                   <tr key={idx} className="hover:bg-slate-50/50 align-top">
                     <td className="px-4 py-3 font-medium text-slate-900 whitespace-nowrap border-r border-slate-200">{detail.question_number}</td>
                     <td className="px-4 py-3 min-w-[200px] border-r border-slate-200">{detail.question_text}</td>
-                    <td className="px-4 py-3 min-w-[200px] border-r border-slate-200">{detail.model_answer}</td>
-                    <td className="px-4 py-3 min-w-[200px] border-r border-slate-200">{detail.student_answer}</td>
+                    <td className="px-4 py-3 min-w-[200px] border-r border-slate-200">
+                      {isEditing ? (
+                        <textarea 
+                          value={detail.model_answer} 
+                          onChange={(e) => handleDetailChange(idx, 'model_answer', e.target.value)}
+                          className="w-full border border-slate-300 rounded p-1.5 text-sm"
+                          rows={3}
+                        />
+                      ) : (
+                        detail.model_answer
+                      )}
+                    </td>
+                    <td className="px-4 py-3 min-w-[200px] border-r border-slate-200">
+                      {isEditing ? (
+                        <textarea 
+                          value={detail.student_answer} 
+                          onChange={(e) => handleDetailChange(idx, 'student_answer', e.target.value)}
+                          className="w-full border border-slate-300 rounded p-1.5 text-sm"
+                          rows={3}
+                        />
+                      ) : (
+                        detail.student_answer
+                      )}
+                    </td>
                     <td className="px-4 py-3 min-w-[200px] border-r border-slate-200">
                       {isEditing ? (
                         <textarea 
@@ -211,7 +233,16 @@ function StudentGradingDetails({ student, onUpdate }: { student: Student, onUpda
                       )}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="font-medium text-slate-500">{detail.max_grade || '-'}</span>
+                      {isEditing ? (
+                        <input 
+                          type="text" 
+                          value={detail.max_grade || ''} 
+                          onChange={(e) => handleDetailChange(idx, 'max_grade', e.target.value)}
+                          className="w-20 border border-slate-300 rounded p-1.5 text-sm font-medium"
+                        />
+                      ) : (
+                        <span className="font-medium text-slate-500">{detail.max_grade || '-'}</span>
+                      )}
                     </td>
                   </tr>
                 ))}
