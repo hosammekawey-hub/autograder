@@ -180,8 +180,30 @@ function StudentGradingDetails({ student, onUpdate }: { student: Student, onUpda
               <tbody className="divide-y divide-slate-200">
                 {details.map((detail, idx) => (
                   <tr key={idx} className="hover:bg-slate-50/50 align-top">
-                    <td className="px-4 py-3 font-medium text-slate-900 whitespace-nowrap border-r border-slate-200">{detail.question_number}</td>
-                    <td className="px-4 py-3 min-w-[200px] border-r border-slate-200">{detail.question_text}</td>
+                    <td className="px-4 py-3 font-medium text-slate-900 whitespace-nowrap border-r border-slate-200">
+                      {isEditing ? (
+                        <input 
+                          type="text" 
+                          value={detail.question_number} 
+                          onChange={(e) => handleDetailChange(idx, 'question_number', e.target.value)}
+                          className="w-16 border border-slate-300 rounded p-1.5 text-sm font-medium"
+                        />
+                      ) : (
+                        detail.question_number
+                      )}
+                    </td>
+                    <td className="px-4 py-3 min-w-[200px] border-r border-slate-200">
+                      {isEditing ? (
+                        <textarea 
+                          value={detail.question_text} 
+                          onChange={(e) => handleDetailChange(idx, 'question_text', e.target.value)}
+                          className="w-full border border-slate-300 rounded p-1.5 text-sm"
+                          rows={3}
+                        />
+                      ) : (
+                        detail.question_text
+                      )}
+                    </td>
                     <td className="px-4 py-3 min-w-[200px] border-r border-slate-200">
                       {isEditing ? (
                         <textarea 
