@@ -43,11 +43,12 @@ type GradingDetail = {
   max_grade?: string;
 };
 
-function StudentGradingDetails({ student, onUpdate }: { student: Student, onUpdate: (studentId: string, updates: Partial<Student>) => void }) {
+function StudentGradingDetails({ student, onUpdate, llmModel }: { student: Student, onUpdate: (studentId: string, updates: Partial<Student>) => void, llmModel?: string }) {
   const [details, setDetails] = useState<GradingDetail[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [editedGrade, setEditedGrade] = useState(student.grade || '');
   const [isExpanded, setIsExpanded] = useState(false);
+  const [regradingIndex, setRegradingIndex] = useState<number | null>(null);
 
   useEffect(() => {
     if (student.grading_details) {
@@ -70,6 +71,48 @@ function StudentGradingDetails({ student, onUpdate }: { student: Student, onUpda
         return sum + grade;
       }, 0);
       setEditedGrade(total.toString());
+    }
+  };
+
+  const handleRegradeEntry = async (index: number) => {
+    setRegradingIndex(index);
+    const detail = details[index];
+    try {
+      const res = await fetch('/api/regrade-entry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question_text: detail.question_text,
+          model_answer: detail.model_answer,
+          student_answer: detail.student_answer,
+          max_grade: detail.max_grade || '',
+          llmModel: llmModel
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const newDetails = [...details];
+        newDetails[index] = {
+          ...newDetails[index],
+          identified_issue: data.identified_issue,
+          suggested_grade: data.suggested_grade
+        };
+        setDetails(newDetails);
+        
+        // Recalculate total grade
+        const total = newDetails.reduce((sum, d) => {
+          const grade = parseFloat(d.suggested_grade) || 0;
+          return sum + grade;
+        }, 0);
+        setEditedGrade(total.toString());
+      } else {
+        alert(`Regrade failed: ${data.error}`);
+      }
+    } catch (error) {
+      console.error('Regrade error:', error);
+      alert('Failed to regrade entry.');
+    } finally {
+      setRegradingIndex(null);
     }
   };
 
@@ -174,7 +217,8 @@ function StudentGradingDetails({ student, onUpdate }: { student: Student, onUpda
                   <th className="px-4 py-3 font-medium border-r border-slate-200">Student Answer</th>
                   <th className="px-4 py-3 font-medium border-r border-slate-200">Identified Issue</th>
                   <th className="px-4 py-3 font-medium border-r border-slate-200">Grade</th>
-                  <th className="px-4 py-3 font-medium">Max Grade</th>
+                  <th className="px-4 py-3 font-medium border-r border-slate-200">Max Grade</th>
+                  {isEditing && <th className="px-4 py-3 font-medium">Actions</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
@@ -254,7 +298,7 @@ function StudentGradingDetails({ student, onUpdate }: { student: Student, onUpda
                         <span className="font-medium text-slate-900">{detail.suggested_grade}</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
+                    <td className="px-4 py-3 whitespace-nowrap border-r border-slate-200">
                       {isEditing ? (
                         <input 
                           type="text" 
@@ -266,6 +310,27 @@ function StudentGradingDetails({ student, onUpdate }: { student: Student, onUpda
                         <span className="font-medium text-slate-500">{detail.max_grade || '-'}</span>
                       )}
                     </td>
+                    {isEditing && (
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <button
+                          onClick={() => handleRegradeEntry(idx)}
+                          disabled={regradingIndex === idx}
+                          className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded font-medium hover:bg-indigo-200 transition-colors disabled:opacity-50 flex items-center gap-1"
+                        >
+                          {regradingIndex === idx ? (
+                            <>
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              Regrading...
+                            </>
+                          ) : (
+                            <>
+                              <RefreshCw className="w-3 h-3" />
+                              Regrade
+                            </>
+                          )}
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

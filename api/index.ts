@@ -660,6 +660,56 @@ app.post('/api/students/:id/grade', async (req, res) => {
   }
 });
 
+// Regrade a single entry
+app.post('/api/regrade-entry', async (req, res) => {
+  try {
+    const { question_text, model_answer, student_answer, max_grade, llmModel } = req.body;
+
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const modelToUse = llmModel || 'gemini-3.1-pro-preview';
+
+    const prompt = `You are an expert grader. Regrade the following student answer based on the provided question, model answer, and maximum grade.
+Provide the identified issue (or 'None' if correct) and the suggested numeric grade.
+
+Question: ${question_text}
+Model Answer: ${model_answer}
+Student Answer: ${student_answer}
+Max Grade: ${max_grade}
+`;
+
+    const response = await ai.models.generateContent({
+      model: modelToUse,
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            identified_issue: { type: Type.STRING, description: "Identified issue, or 'None' if correct" },
+            suggested_grade: { type: Type.STRING, description: "The numeric points awarded for this sub-question (e.g., '5', '2.5')." }
+          },
+          required: ["identified_issue", "suggested_grade"]
+        }
+      }
+    });
+
+    let rawText = response.text?.trim() || "{}";
+    rawText = rawText.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '');
+    let result;
+    try {
+      result = JSON.parse(rawText);
+    } catch (parseError) {
+      throw new Error("AI returned invalid JSON format.");
+    }
+
+    res.json({ success: true, identified_issue: result.identified_issue, suggested_grade: result.suggested_grade });
+
+  } catch (error: any) {
+    console.error('Regrade entry error:', error);
+    res.status(500).json({ error: error.message || 'Failed to regrade entry' });
+  }
+});
+
 // 4. Batch Grading
 app.post('/api/sessions/:sessionId/grade-all', async (req, res) => {
   try {
